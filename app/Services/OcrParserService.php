@@ -28,9 +28,15 @@ class OcrParserService
         foreach ($fields as $field) {
             $key = $field['key'];
             $value = null;
+            $mode = $field['extraction_mode'] ?? 'auto';
 
-            // 1. Try matching field keywords against detected pairs
-            if (!empty($field['keywords'])) {
+            // 1. Try regex first (most specific, highest accuracy)
+            if ($value === null && !empty($field['regex'])) {
+                $value = $this->extractByRegex($normalizedText, $field['regex'], $mode);
+            }
+
+            // 2. Try matching field keywords against detected pairs
+            if ($value === null && !empty($field['keywords'])) {
                 foreach ($field['keywords'] as $keyword) {
                     $kwLower = mb_strtolower(trim($keyword));
                     $kwNorm = rtrim($kwLower, '.。:：');
@@ -44,7 +50,7 @@ class OcrParserService
                 }
             }
 
-            // 2. Try matching field label against detected pairs
+            // 3. Try matching field label against detected pairs
             if ($value === null && !empty($field['label'])) {
                 $labelLower = rtrim(mb_strtolower($field['label']), '.。:：');
                 foreach ($detectedMap as $dKey => $dVal) {
@@ -56,19 +62,23 @@ class OcrParserService
                 }
             }
 
-            $mode = $field['extraction_mode'] ?? 'auto';
-
-            // 3. Fallback: regex on line-by-line basis
-            if ($value === null && !empty($field['regex'])) {
-                $value = $this->extractByRegex($normalizedText, $field['regex'], $mode);
-            }
-
             // 4. Fallback: keyword line matching
             if ($value === null && !empty($field['keywords'])) {
                 $value = $this->extractByKeywords($normalizedText, $field['keywords'], $mode);
             }
 
-            $result[$key] = $value !== null ? $this->cleanValue($value) : null;
+            if ($value !== null) {
+                $value = $this->cleanValue($value);
+                // Apply field-level transforms
+                if (!empty($field['transform'])) {
+                    $value = $this->applyTransforms($value, (array) $field['transform']);
+                }
+                // Apply field-level format
+                if (!empty($field['format'])) {
+                    $value = $this->applyFormat($value, $field['format']);
+                }
+            }
+            $result[$key] = $value;
         }
 
         return $result;
@@ -103,6 +113,24 @@ class OcrParserService
                         $nextLine = trim($lines[$i + 1]);
                         if ($nextLine !== '' && mb_strlen($nextLine) <= 60) {
                             return $nextLine;
+                        }
+                    }
+                }
+            }
+
+            // Multi-line window pass for 'auto' mode:
+            // Join consecutive lines and retry — handles label on one line, value on another
+            if ($mode === 'auto') {
+                $lineCount = count($lines);
+                for ($windowSize = 2; $windowSize <= 5; $windowSize++) {
+                    for ($i = 0; $i <= $lineCount - $windowSize; $i++) {
+                        $group = array_slice($lines, $i, $windowSize);
+                        $combined = implode(' ', $group);
+                        if (preg_match('~' . $pattern . '~iu', $combined, $matches)) {
+                            $value = trim($matches[1] ?? $matches[0]);
+                            if ($value !== '') {
+                                return $value;
+                            }
                         }
                     }
                 }
@@ -193,6 +221,44 @@ class OcrParserService
     }
 
     /**
+     * Apply transform operations to an extracted value.
+     *
+     * Supported transforms:
+     *   'remove_spaces'  — strip all whitespace
+     *   'uppercase'      — convert to UPPERCASE
+     *   'lowercase'      — convert to lowercase
+     *   'trim'           — trim leading/trailing whitespace (already done by cleanValue)
+     *   'digits_only'    — keep only digits
+     *   'alphanumeric'   — keep only letters and digits
+     */
+    private function applyTransforms(string $value, array $transforms): string
+    {
+        foreach ($transforms as $t) {
+            switch ($t) {
+                case 'remove_spaces':
+                    $value = preg_replace('/\s+/', '', $value);
+                    break;
+                case 'uppercase':
+                    $value = mb_strtoupper($value);
+                    break;
+                case 'lowercase':
+                    $value = mb_strtolower($value);
+                    break;
+                case 'trim':
+                    $value = trim($value);
+                    break;
+                case 'digits_only':
+                    $value = preg_replace('/[^0-9]/', '', $value);
+                    break;
+                case 'alphanumeric':
+                    $value = preg_replace('/[^a-zA-Z0-9]/', '', $value);
+                    break;
+            }
+        }
+        return $value;
+    }
+
+    /**
      * Clean an extracted value.
      */
     private function cleanValue(string $value): string
@@ -204,9 +270,6 @@ class OcrParserService
         $value = preg_replace('/\s+/', ' ', $value);
 
         $value = trim($value);
-
-        // Normalize dates like "27 DEC 2024" → "27/12/2024"
-        $value = $this->normalizeDate($value);
 
         return $value;
     }
@@ -234,6 +297,173 @@ class OcrParserService
         }
 
         return $value;
+    }
+
+    /**
+     * Apply a format rule to an extracted value.
+     *
+     * Supported prefixes:
+     *   'date:DD/MM/YYYY'             — numeric date
+     *   'date:YYYY-MM-DD'             — ISO date
+     *   'date:DD/MM/YYYY+543'         — Buddhist Era numeric
+     *   'date:DD MON YYYY'            — English month name
+     *   'date:DD MON YYYY+543'        — English month name + BE year
+     *   'date:DD เดือนไทย YYYY+543'   — Thai month name + BE year
+     */
+    private function applyFormat(string $value, string $format): string
+    {
+        if (!str_starts_with($format, 'date:')) {
+            return $value;
+        }
+
+        $pattern = substr($format, 5); // remove 'date:' prefix
+        $parsed = $this->parseAnyDate($value);
+
+        if ($parsed === null) {
+            return $value; // can't parse, return as-is
+        }
+
+        [$day, $month, $yearCE] = $parsed;
+
+        $addBE = false;
+        if (str_ends_with($pattern, '+543')) {
+            $addBE = true;
+            $pattern = substr($pattern, 0, -4); // remove '+543'
+        }
+
+        $year = $addBE ? $yearCE + 543 : $yearCE;
+
+        $englishMonths = [
+            1 => 'JAN', 2 => 'FEB', 3 => 'MAR', 4 => 'APR',
+            5 => 'MAY', 6 => 'JUN', 7 => 'JUL', 8 => 'AUG',
+            9 => 'SEP', 10 => 'OCT', 11 => 'NOV', 12 => 'DEC',
+        ];
+
+        $thaiMonths = [
+            1 => 'ม.ค.', 2 => 'ก.พ.', 3 => 'มี.ค.', 4 => 'เม.ย.',
+            5 => 'พ.ค.', 6 => 'มิ.ย.', 7 => 'ก.ค.', 8 => 'ส.ค.',
+            9 => 'ก.ย.', 10 => 'ต.ค.', 11 => 'พ.ย.', 12 => 'ธ.ค.',
+        ];
+
+        $dd = str_pad($day, 2, '0', STR_PAD_LEFT);
+        $mm = str_pad($month, 2, '0', STR_PAD_LEFT);
+
+        return match (trim($pattern)) {
+            'DD/MM/YYYY'       => "{$dd}/{$mm}/{$year}",
+            'YYYY-MM-DD'       => "{$year}-{$mm}-{$dd}",
+            'DD MON YYYY'      => "{$dd} " . ($englishMonths[$month] ?? $mm) . " {$year}",
+            'DD เดือนไทย YYYY' => "{$dd} " . ($thaiMonths[$month] ?? $mm) . " {$year}",
+            default            => $value,
+        };
+    }
+
+    /**
+     * Parse a date string in various formats into [day, month, yearCE].
+     *
+     * Handles: DD/MM/YYYY, DD-MM-YYYY, DD MON YYYY (English),
+     * DD เดือน YYYY (Thai abbreviated), DD.MM.YYYY.
+     * Years > 2400 are treated as Buddhist Era and converted to CE.
+     *
+     * @return array{0:int,1:int,2:int}|null  [day, month, yearCE] or null
+     */
+    private function parseAnyDate(string $value): ?array
+    {
+        $value = trim($value);
+        // Normalize whitespace (including non‑breaking spaces) to single ASCII space
+        $value = preg_replace('/\s+/u', ' ', $value);
+
+        // English month map
+        $enMonths = [
+            'JAN' => 1, 'JANUARY' => 1,
+            'FEB' => 2, 'FEBRUARY' => 2,
+            'MAR' => 3, 'MARCH' => 3,
+            'APR' => 4, 'APRIL' => 4,
+            'MAY' => 5,
+            'JUN' => 6, 'JUNE' => 6,
+            'JUL' => 7, 'JULY' => 7,
+            'AUG' => 8, 'AUGUST' => 8,
+            'SEP' => 9, 'SEPTEMBER' => 9,
+            'OCT' => 10, 'OCTOBER' => 10,
+            'NOV' => 11, 'NOVEMBER' => 11,
+            'DEC' => 12, 'DECEMBER' => 12,
+        ];
+
+        // Thai month map (abbreviated + full)
+        $thaiMonths = [
+            'ม.ค.' => 1, 'มกราคม' => 1,
+            'ก.พ.' => 2, 'กุมภาพันธ์' => 2,
+            'มี.ค.' => 3, 'มีนาคม' => 3,
+            'เม.ย.' => 4, 'เมษายน' => 4,
+            'พ.ค.' => 5, 'พฤษภาคม' => 5,
+            'มิ.ย.' => 6, 'มิถุนายน' => 6,
+            'ก.ค.' => 7, 'กรกฎาคม' => 7,
+            'ส.ค.' => 8, 'สิงหาคม' => 8,
+            'ก.ย.' => 9, 'กันยายน' => 9,
+            'ต.ค.' => 10, 'ตุลาคม' => 10,
+            'พ.ย.' => 11, 'พฤศจิกายน' => 11,
+            'ธ.ค.' => 12, 'ธันวาคม' => 12,
+        ];
+
+        // 1) Numeric: DD/MM/YYYY  DD-MM-YYYY  DD.MM.YYYY
+        if (preg_match('/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/', $value, $m)) {
+            $year = (int) $m[3];
+            if ($year > 2400) $year -= 543;
+            return [(int) $m[1], (int) $m[2], $year];
+        }
+
+        // 2) English month: DD MON YYYY
+        if (preg_match('/^(\d{1,2})[\s\/\-\.]([A-Za-z]+)[\s\/\-\.](\d{4})$/u', $value, $m)) {
+            $mon = $enMonths[strtoupper($m[2])] ?? null;
+            if ($mon !== null) {
+                $year = (int) $m[3];
+                if ($year > 2400) $year -= 543;
+                return [(int) $m[1], $mon, $year];
+            }
+        }
+
+        // 3) Thai month — explicit match (handles optional/missing spaces around month)
+        $thaiAbbr = [
+            'ม\.ค\.' => 1, 'ก\.พ\.' => 2, 'มี\.ค\.' => 3, 'เม\.ย\.' => 4,
+            'พ\.ค\.' => 5, 'มิ\.ย\.' => 6, 'ก\.ค\.' => 7, 'ส\.ค\.' => 8,
+            'ก\.ย\.' => 9, 'ต\.ค\.' => 10, 'พ\.ย\.' => 11, 'ธ\.ค\.' => 12,
+        ];
+        $thaiFull = [
+            'มกราคม' => 1, 'กุมภาพันธ์' => 2, 'มีนาคม' => 3, 'เมษายน' => 4,
+            'พฤษภาคม' => 5, 'มิถุนายน' => 6, 'กรกฎาคม' => 7, 'สิงหาคม' => 8,
+            'กันยายน' => 9, 'ตุลาคม' => 10, 'พฤศจิกายน' => 11, 'ธันวาคม' => 12,
+        ];
+
+        // Build alternation: abbreviated first (escaped dots), then full names
+        $abbrPattern = implode('|', array_keys($thaiAbbr));
+        $fullPattern = implode('|', array_map(fn($n) => preg_quote($n, '/'), array_keys($thaiFull)));
+        $thaiMonthRegex = $abbrPattern . '|' . $fullPattern;
+
+        if (preg_match('/(\d{1,2})\s*(' . $thaiMonthRegex . ')\s*(\d{4})/u', $value, $m)) {
+            // Resolve month number: try abbreviated (restore dots), then full
+            $matched = $m[2];
+            $mon = $thaiFull[$matched] ?? null;
+            if ($mon === null) {
+                // It matched an abbreviated name — look up in thaiMonths
+                $mon = $thaiMonths[$matched] ?? null;
+            }
+            if ($mon !== null) {
+                $year = (int) $m[3];
+                if ($year > 2400) $year -= 543;
+                return [(int) $m[1], $mon, $year];
+            }
+        }
+
+        // 4) Fallback: generic DD <text> YYYY
+        if (preg_match('/^(\d{1,2})\s+(.+?)\s+(\d{4})$/u', $value, $m)) {
+            $mon = $thaiMonths[trim($m[2])] ?? null;
+            if ($mon !== null) {
+                $year = (int) $m[3];
+                if ($year > 2400) $year -= 543;
+                return [(int) $m[1], $mon, $year];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -491,6 +721,10 @@ class OcrParserService
             // Thai ID
             'เลขประจำตัวประชาชน', 'ชื่อ', 'นามสกุล', 'วันเกิด', 'ที่อยู่', 'วันออกบัตร', 'วันบัตรหมดอายุ',
             'Name', 'Last name', 'Date of Birth', 'Date of Issue', 'Date of Expiry',
+            // Thai Work Permit
+            'ใบอนุญาตทำงานเลขที่', 'ชื่อผู้รับอนุญาตให้ทำงาน', 'วัน เดือน ปีเกิด', 'สัญชาติ',
+            'ประเภทงานที่ได้รับอนุญาต', 'วันออกใบอนุญาตทำงาน', 'วันสิ้นสุดใบอนุญาตทำงาน',
+            'Work Permit No', 'Permitted Category of Work',
             // Other common
             'ID Number', 'Card Number', 'Registration No', 'Address', 'Occupation',
         ];

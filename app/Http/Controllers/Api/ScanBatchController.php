@@ -19,23 +19,40 @@ class ScanBatchController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $user = $request->user();
+
+        // Own batches + public batches from others
         $query = ScanBatch::withCount('labours')
-            ->where('user_id', $request->user()->id)
+            ->where(function ($q) use ($user) {
+                $q->where('user_id', $user->id)
+                  ->orWhere('visibility', 'public');
+            })
             ->latest();
 
         if ($search = $request->input('search')) {
             $query->where('name', 'like', "%{$search}%");
         }
+        if ($label = $request->input('label')) {
+            $query->where('label', $label);
+        }
+        if ($request->input('mine_only')) {
+            $query->where('user_id', $user->id);
+        }
 
-        $batches = $query->paginate($request->input('per_page', 20));
+        $batches = $query->with('owner:id,name')->paginate($request->input('per_page', 20));
 
         return response()->json($batches);
     }
 
     public function show(ScanBatch $scanBatch, Request $request): JsonResponse
     {
-        abort_if($scanBatch->user_id !== $request->user()->id, 403, 'ไม่มีสิทธิ์เข้าถึงข้อมูลนี้');
-        $scanBatch->load('labours');
+        $user = $request->user();
+        abort_if(
+            $scanBatch->user_id !== $user->id && $scanBatch->visibility !== 'public',
+            403,
+            'ไม่มีสิทธิ์เข้าถึงข้อมูลนี้'
+        );
+        $scanBatch->load('labours', 'owner:id,name');
 
         return response()->json($scanBatch);
     }
@@ -44,7 +61,9 @@ class ScanBatchController extends Controller
     {
         $validated = $request->validate([
             'name'          => 'required|string|max:255',
+            'label'         => 'nullable|string|max:100',
             'note'          => 'nullable|string|max:1000',
+            'visibility'    => 'nullable|in:private,public',
             'items'         => 'required|array|min:1',
             'items.*.document_type' => 'nullable|string|in:idcard,passport',
             'items.*.id_card'       => 'nullable|string|max:20',
@@ -63,14 +82,18 @@ class ScanBatchController extends Controller
         return DB::transaction(function () use ($validated, $request) {
             $batch = ScanBatch::create([
                 'name'        => $validated['name'],
+                'label'       => $validated['label'] ?? null,
                 'note'        => $validated['note'] ?? null,
                 'total_count' => count($validated['items']),
                 'user_id'     => $request->user()->id,
+                'visibility'  => $validated['visibility'] ?? 'private',
             ]);
 
+            $vis = $validated['visibility'] ?? 'private';
             foreach ($validated['items'] as $item) {
-                $item['batch_id'] = $batch->id;
-                $item['user_id']  = $request->user()->id;
+                $item['batch_id']   = $batch->id;
+                $item['user_id']    = $request->user()->id;
+                $item['visibility'] = $vis;
 
                 if (!empty($item['passport_no'])) {
                     Labour::updateOrCreate(
@@ -94,6 +117,24 @@ class ScanBatchController extends Controller
                 'batch'   => $batch,
             ], 201);
         });
+    }
+
+    public function updateVisibility(ScanBatch $scanBatch, Request $request): JsonResponse
+    {
+        abort_if($scanBatch->user_id !== $request->user()->id, 403, 'ไม่มีสิทธิ์แก้ไขข้อมูลนี้');
+
+        $request->validate([
+            'visibility' => 'required|in:private,public',
+        ]);
+
+        $scanBatch->update(['visibility' => $request->input('visibility')]);
+        // Sync labours visibility
+        $scanBatch->labours()->update(['visibility' => $request->input('visibility')]);
+
+        return response()->json([
+            'message'    => 'อัปเดตสิทธิ์เรียบร้อย',
+            'visibility' => $scanBatch->visibility,
+        ]);
     }
 
     public function destroy(ScanBatch $scanBatch, Request $request): JsonResponse

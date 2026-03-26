@@ -12,6 +12,7 @@ class Labour extends Model
     protected $fillable = [
         'user_id',
         'batch_id',
+        'visibility',   // 'private' | 'public'
         'id_card',
         'passport_no',
         'document_type',

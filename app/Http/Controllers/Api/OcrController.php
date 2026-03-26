@@ -3,13 +3,16 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Labour;
 use App\Models\OcrFieldMapping;
 use App\Models\OcrResult;
+use App\Models\ScanBatch;
 use App\Services\GoogleVisionService;
 use App\Services\OcrExcelExportService;
 use App\Services\OcrParserService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -387,6 +390,9 @@ class OcrController extends Controller
             'fields.*.keywords.*' => 'string|max:255',
             'fields.*.regex'    => 'nullable|string|max:500',
             'fields.*.extraction_mode' => 'nullable|string|in:auto,same_line,next_line',
+            'fields.*.transform'   => 'nullable|array',
+            'fields.*.transform.*' => 'string|in:remove_spaces,uppercase,lowercase,trim,digits_only,alphanumeric',
+            'fields.*.format'      => 'nullable|string|max:100',
             'detection_landmarks'            => 'nullable|array',
             'detection_landmarks.*.type'     => 'required|string|in:mrz,keyword,regex,not_keyword',
             'detection_landmarks.*.value'    => 'nullable|string|max:500',
@@ -415,6 +421,9 @@ class OcrController extends Controller
             'fields.*.keywords.*' => 'string|max:255',
             'fields.*.regex'    => 'nullable|string|max:500',
             'fields.*.extraction_mode' => 'nullable|string|in:auto,same_line,next_line',
+            'fields.*.transform'   => 'nullable|array',
+            'fields.*.transform.*' => 'string|in:remove_spaces,uppercase,lowercase,trim,digits_only,alphanumeric',
+            'fields.*.format'      => 'nullable|string|max:100',
             'detection_landmarks'            => 'nullable|array',
             'detection_landmarks.*.type'     => 'required|string|in:mrz,keyword,regex,not_keyword',
             'detection_landmarks.*.value'    => 'nullable|string|max:500',
@@ -449,6 +458,130 @@ class OcrController extends Controller
         return response()->json([
             'fields' => OcrParserService::defaultPassportFields(),
         ]);
+    }
+
+    /**
+     * Save completed OCR results from a batch as Labour records.
+     * POST /api/ocr/batch/{batchId}/save-labours
+     */
+    public function saveBatchAsLabours(string $batchId, Request $request): JsonResponse
+    {
+        $request->validate([
+            'batch_name'  => 'required|string|max:255',
+            'label'       => 'nullable|string|max:100',
+            'note'        => 'nullable|string|max:1000',
+            'visibility'  => 'nullable|in:private,public',
+            'result_ids'  => 'nullable|array',   // ถ้าไม่ส่ง = บันทึกทุก completed
+            'result_ids.*' => 'integer',
+        ]);
+
+        $user = $request->user();
+        $visibility = $request->input('visibility', 'private');
+
+        // ดึง OCR results ที่ completed ของ batch นี้
+        $query = OcrResult::where('batch_id', $batchId)
+            ->where('user_id', $user->id)
+            ->where('status', 'completed')
+            ->whereNotNull('extracted_data');
+
+        if ($request->filled('result_ids')) {
+            $query->whereIn('id', $request->input('result_ids'));
+        }
+
+        $ocrResults = $query->get();
+
+        if ($ocrResults->isEmpty()) {
+            return response()->json(['message' => 'ไม่มีผลลัพธ์ที่พร้อมบันทึก'], 422);
+        }
+
+        return DB::transaction(function () use ($ocrResults, $batchId, $request, $user, $visibility) {
+            // สร้าง ScanBatch ใหม่เพื่อกลุ่ม
+            $scanBatch = ScanBatch::create([
+                'user_id'     => $user->id,
+                'name'        => $request->input('batch_name'),
+                'label'       => $request->input('label'),
+                'note'        => $request->input('note'),
+                'total_count' => $ocrResults->count(),
+                'visibility'  => $visibility,
+            ]);
+
+            $saved = 0;
+            $skipped = 0;
+
+            foreach ($ocrResults as $result) {
+                $data = $result->extracted_data ?? [];
+
+                // Map OCR fields → Labour fields
+                $labourData = [
+                    'user_id'       => $user->id,
+                    'batch_id'      => $scanBatch->id,
+                    'visibility'    => $visibility,
+                    'document_type' => $data['document_type'] ?? null,
+                    'id_card'       => $data['id_card'] ?? $data['id_number'] ?? null,
+                    'passport_no'   => $data['passport_no'] ?? $data['passport_number'] ?? null,
+                    'prefix'        => $data['prefix'] ?? $data['title'] ?? null,
+                    'firstname'     => $data['firstname'] ?? $data['given_names'] ?? $data['first_name'] ?? null,
+                    'middlename'    => $data['middlename'] ?? $data['middle_name'] ?? null,
+                    'lastname'      => $data['lastname'] ?? $data['surname'] ?? $data['last_name'] ?? null,
+                    'firstname_en'  => $data['firstname_en'] ?? null,
+                    'lastname_en'   => $data['lastname_en'] ?? null,
+                    'birthdate'     => $this->parseDate($data['birthdate'] ?? $data['date_of_birth'] ?? null),
+                    'gender'        => $data['gender'] ?? $data['sex'] ?? null,
+                    'nationality'   => $data['nationality'] ?? null,
+                    'address'       => $data['address'] ?? null,
+                    'issue_date'    => $this->parseDate($data['issue_date'] ?? $data['date_of_issue'] ?? null),
+                    'expiry_date'   => $this->parseDate($data['expiry_date'] ?? $data['date_of_expiry'] ?? null),
+                    'issue_place'   => $data['issue_place'] ?? $data['place_of_issue'] ?? null,
+                ];
+
+                // ต้องมีชื่ออย่างน้อย
+                if (empty($labourData['firstname']) && empty($labourData['lastname'])) {
+                    $skipped++;
+                    continue;
+                }
+
+                // upsert ถ้ามี passport_no หรือ id_card ซ้ำของ user เดียวกัน
+                if (!empty($labourData['passport_no'])) {
+                    Labour::updateOrCreate(
+                        ['user_id' => $user->id, 'passport_no' => $labourData['passport_no']],
+                        $labourData
+                    );
+                } elseif (!empty($labourData['id_card'])) {
+                    Labour::updateOrCreate(
+                        ['user_id' => $user->id, 'id_card' => $labourData['id_card']],
+                        $labourData
+                    );
+                } else {
+                    Labour::create($labourData);
+                }
+
+                $saved++;
+            }
+
+            $scanBatch->update(['total_count' => $saved]);
+
+            return response()->json([
+                'message'    => "บันทึกสำเร็จ {$saved} รายการ" . ($skipped > 0 ? " (ข้าม {$skipped} รายการ)" : ''),
+                'batch_id'   => $scanBatch->id,
+                'batch_name' => $scanBatch->name,
+                'saved'      => $saved,
+                'skipped'    => $skipped,
+                'visibility' => $visibility,
+            ], 201);
+        });
+    }
+
+    /**
+     * Safe date parse — returns null if invalid.
+     */
+    private function parseDate(?string $val): ?string
+    {
+        if (!$val) return null;
+        try {
+            return \Carbon\Carbon::parse($val)->toDateString();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

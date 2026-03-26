@@ -44,6 +44,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/scan-batches', [ScanBatchController::class, 'index']);
     Route::post('/scan-batches', [ScanBatchController::class, 'store']);
     Route::get('/scan-batches/{scanBatch}', [ScanBatchController::class, 'show']);
+    Route::patch('/scan-batches/{scanBatch}/visibility', [ScanBatchController::class, 'updateVisibility']);
     Route::get('/scan-batches/{scanBatch}/export', [ScanBatchController::class, 'export']);
     Route::delete('/scan-batches/{scanBatch}', [ScanBatchController::class, 'destroy']);
 
@@ -67,6 +68,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // Batch results
         Route::get('/batch/{batchId}', [OcrController::class, 'batch']);
         Route::get('/batch/{batchId}/export', [OcrController::class, 'exportBatch']);
+        // Save OCR batch results as labour records
+        Route::post('/batch/{batchId}/save-labours', [OcrController::class, 'saveBatchAsLabours']);
 
         // Results (list, show, delete)
         Route::get('/results', [OcrController::class, 'results']);
