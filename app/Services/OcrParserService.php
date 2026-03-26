@@ -405,14 +405,14 @@ class OcrParserService
         ];
 
         // 1) Numeric: DD/MM/YYYY  DD-MM-YYYY  DD.MM.YYYY
-        if (preg_match('/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/', $value, $m)) {
+        if (preg_match('/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/', $value, $m)) {
             $year = (int) $m[3];
             if ($year > 2400) $year -= 543;
             return [(int) $m[1], (int) $m[2], $year];
         }
 
-        // 2) English month: DD MON YYYY
-        if (preg_match('/^(\d{1,2})[\s\/\-\.]([A-Za-z]+)[\s\/\-\.](\d{4})$/u', $value, $m)) {
+        // 2) English month: DD MON YYYY (search within text, not exact match)
+        if (preg_match('/(\d{1,2})[\s\/\-\.]([A-Za-z]+)[\s\/\-\.](\d{4})/u', $value, $m)) {
             $mon = $enMonths[strtoupper($m[2])] ?? null;
             if ($mon !== null) {
                 $year = (int) $m[3];
@@ -454,7 +454,7 @@ class OcrParserService
         }
 
         // 4) Fallback: generic DD <text> YYYY
-        if (preg_match('/^(\d{1,2})\s+(.+?)\s+(\d{4})$/u', $value, $m)) {
+        if (preg_match('/(\d{1,2})\s+(.+?)\s+(\d{4})/u', $value, $m)) {
             $mon = $thaiMonths[trim($m[2])] ?? null;
             if ($mon !== null) {
                 $year = (int) $m[3];
