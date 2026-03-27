@@ -112,6 +112,11 @@ class OcrParserService
                     if ($mode !== 'same_line' && isset($lines[$i + 1])) {
                         $nextLine = trim($lines[$i + 1]);
                         if ($nextLine !== '' && mb_strlen($nextLine) <= 60) {
+                            // Try regex on combined (current + next) line for precise capture
+                            $combined = $line . ' ' . $nextLine;
+                            if (preg_match('~' . $pattern . '~iu', $combined, $m2) && !empty(trim($m2[1] ?? ''))) {
+                                return trim($m2[1]);
+                            }
                             return $nextLine;
                         }
                     }
@@ -252,6 +257,18 @@ class OcrParserService
                     break;
                 case 'alphanumeric':
                     $value = preg_replace('/[^a-zA-Z0-9]/', '', $value);
+                    break;
+                case 'normalize_gender':
+                    $upper = mb_strtoupper(trim($value));
+                    if (in_array($upper, ['MALE', 'M'], true)) {
+                        $value = 'Male';
+                    } elseif (in_array($upper, ['FEMALE', 'F'], true)) {
+                        $value = 'Female';
+                    } elseif (str_starts_with($upper, 'M')) {
+                        $value = 'Male';
+                    } elseif (str_starts_with($upper, 'F')) {
+                        $value = 'Female';
+                    }
                     break;
             }
         }
@@ -975,7 +992,7 @@ class OcrParserService
                 'key'             => 'expiry_date',
                 'label'           => 'Expiry Date',
                 'keywords'        => ['Date of Expiry', 'Expiry Date', 'Expiration Date', 'Valid Until', 'Expires'],
-                'regex'           => '(?:Date\s*of\s*Expiry|Expiry\s*Date|Expiration\s*Date|Valid\s*Until|Expires)\s*[:：]?\s*(\d{1,2}[\s\/\-\.]\w{2,9}[\s\/\-\.]\d{2,4})',
+                'regex'           => '(?:Date\s*of\s*[Ee]xpiry|Expiry\s*Date|Expiration\s*Date|Valid\s*Until|Expires)\b.{0,30}?(\d{1,2}[\s\/\-\.]\w{2,9}[\s\/\-\.]\d{2,4})',
                 'extraction_mode' => 'auto',
             ],
             [
@@ -989,21 +1006,22 @@ class OcrParserService
                 'key'             => 'gender',
                 'label'           => 'Gender',
                 'keywords'        => ['Sex', 'Gender'],
-                'regex'           => '(?:Sex|Gender)\s*[:：/]?\s*(Male|Female|M|F)',
+                'regex'           => '(?:Sex|Gender)\b.{0,50}?\b(Male|Female|M\w{0,3}|F\w{0,5})\b',
                 'extraction_mode' => 'auto',
+                'transform'       => ['normalize_gender'],
             ],
             [
                 'key'             => 'place_of_birth',
                 'label'           => 'Place of Birth',
                 'keywords'        => ['Place of Birth', 'Birth Place'],
-                'regex'           => '(?:Place\s*of\s*Birth|Birth\s*Place)\s*[:：]?\s*([A-Z][A-Za-z ,\-]{2,40})',
+                'regex'           => '(?:Place\s*of\s*Birth|Birth\s*Place)\b.{0,30}?\b([A-Z][A-Za-z]{2,}[A-Za-z ,\-]{0,40})',
                 'extraction_mode' => 'auto',
             ],
             [
                 'key'             => 'issue_date',
                 'label'           => 'Issue Date',
                 'keywords'        => ['Date of Issue', 'Issue Date', 'Issued'],
-                'regex'           => '(?:Date\s*of\s*Issue|Issue\s*Date|Issued)\s*[:：]?\s*(\d{1,2}[\s\/\-\.]\w{2,9}[\s\/\-\.]\d{2,4})',
+                'regex'           => '(?:Date\s*of\s*Issue|Issue\s*Date|Issued)\b.{0,30}?(\d{1,2}[\s\/\-\.]\w{2,9}[\s\/\-\.]\d{2,4})',
                 'extraction_mode' => 'auto',
             ],
         ];

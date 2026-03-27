@@ -10,7 +10,7 @@ class OcrFieldMappingSeeder extends Seeder
 {
     public function run(): void
     {
-        OcrFieldMapping::firstOrCreate(
+        OcrFieldMapping::updateOrCreate(
             ['name' => 'Passport (Default)'],
             [
                 'fields'    => OcrParserService::defaultPassportFields(),
