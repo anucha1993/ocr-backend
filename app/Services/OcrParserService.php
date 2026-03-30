@@ -630,8 +630,8 @@ class OcrParserService
 
             switch ($type) {
                 case 'mrz':
-                    // Check if MRZ lines exist (long alphanumeric lines with '<' characters)
-                    if (preg_match('/[A-Z0-9<]{30,}/', $ocrText) && substr_count($ocrText, '<') >= 5) {
+                    // Check if MRZ lines exist using robust detection
+                    if (count($this->findMrzLines($ocrText)) >= 2) {
                         $score += $weight;
                     }
                     break;
@@ -724,16 +724,7 @@ class OcrParserService
      */
     private function parseMrzFields(string $text): array
     {
-        $lines = preg_split('/\r?\n/', $text);
-        $mrzLines = [];
-        foreach ($lines as $line) {
-            $line = trim($line);
-            // Allow spaces in OCR output — strip them for MRZ detection
-            $stripped = preg_replace('/\s+/', '', $line);
-            if (preg_match('/^[A-Z0-9<]{30,}$/', $stripped) && substr_count($stripped, '<') >= 5) {
-                $mrzLines[] = $stripped;
-            }
-        }
+        $mrzLines = $this->findMrzLines($text);
 
         if (count($mrzLines) < 2) {
             return [];
@@ -789,17 +780,7 @@ class OcrParserService
     private function parseMrz(string $text): array
     {
         $pairs = [];
-        $lines = preg_split('/\r?\n/', $text);
-
-        // Find MRZ lines — lines with lots of '<' characters
-        $mrzLines = [];
-        foreach ($lines as $line) {
-            $line = trim($line);
-            $stripped = preg_replace('/\s+/', '', $line);
-            if (preg_match('/^[A-Z0-9<]{30,}$/', $stripped) && substr_count($stripped, '<') >= 5) {
-                $mrzLines[] = $stripped;
-            }
-        }
+        $mrzLines = $this->findMrzLines($text);
 
         if (count($mrzLines) < 2) {
             return $pairs;
@@ -997,7 +978,69 @@ class OcrParserService
     private function isMrzLine(string $text): bool
     {
         $text = trim($text);
-        return preg_match('/^[A-Z0-9<]{20,}$/', $text) && substr_count($text, '<') >= 3;
+        // Standard MRZ check
+        if (preg_match('/^[A-Z0-9<]{20,}$/', $text) && substr_count($text, '<') >= 3) {
+            return true;
+        }
+        // PDF fallback: normalize and convert spaces to '<'
+        $normalized = $this->normalizeMrzChars($text);
+        $asMrz = preg_replace('/\s+/', '<', $normalized);
+        return preg_match('/^[A-Z0-9<]{20,}$/', $asMrz) && preg_match('/^[PCIVA][A-Z<]|^[A-Z0-9]{2,}/', $asMrz);
+    }
+
+    /**
+     * Normalize angle-bracket-like characters commonly misread by OCR.
+     */
+    private function normalizeMrzChars(string $text): string
+    {
+        return preg_replace('/[«»‹›\x{2039}\x{203A}\x{00AB}\x{00BB}]/u', '<', $text);
+    }
+
+    /**
+     * Find MRZ lines from text — robust for both image and PDF OCR.
+     * Handles: standard '<' fillers, angle-bracket-like characters, and
+     * PDF OCR that reads '<' as spaces.
+     *
+     * @return string[] Array of normalized MRZ lines (spaces stripped, fillers as '<')
+     */
+    private function findMrzLines(string $text): array
+    {
+        $lines = preg_split('/\r?\n/', $text);
+        $mrzLines = [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '') continue;
+
+            // Step 1: Normalize angle-bracket-like Unicode chars to '<'
+            $normalized = $this->normalizeMrzChars($line);
+
+            // Step 2: Strip all whitespace for standard detection
+            $stripped = preg_replace('/\s+/', '', $normalized);
+            if (preg_match('/^[A-Z0-9<]{30,}$/', $stripped) && substr_count($stripped, '<') >= 5) {
+                $mrzLines[] = $stripped;
+                continue;
+            }
+
+            // Step 3: PDF fallback — convert spaces to '<' and check structure
+            // Only for lines that are mostly uppercase letters, digits, and spaces
+            if (preg_match('/^[A-Z0-9< ]{28,}$/i', $normalized)) {
+                $asMrz = preg_replace('/\s+/', '<', $normalized);
+                $asMrz = strtoupper($asMrz);
+                if (strlen($asMrz) >= 28 && preg_match('/^[A-Z0-9<]+$/', $asMrz)) {
+                    // Validate: looks like MRZ line 1 (starts with doc type + country)
+                    $isLine1 = preg_match('/^[PCIVA][A-Z<][A-Z]{3}/', $asMrz);
+                    // Validate: looks like MRZ line 2 (doc number + nationality + date pattern)
+                    $isLine2 = preg_match('/^[A-Z0-9]{9,10}[A-Z]{3}\d{6}/', $asMrz);
+                    if ($isLine1 || $isLine2) {
+                        $mrzLines[] = $asMrz;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        return $mrzLines;
     }
 
     /**
