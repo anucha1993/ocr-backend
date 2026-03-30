@@ -18,6 +18,15 @@ class OcrParserService
         $normalizedText = $this->normalizeText($rawText);
         $result = [];
 
+        // Pre-parse MRZ once if any field uses 'mrz' extraction mode
+        $mrzData = null;
+        foreach ($fields as $f) {
+            if (($f['extraction_mode'] ?? 'auto') === 'mrz') {
+                $mrzData = $this->parseMrzFields($normalizedText);
+                break;
+            }
+        }
+
         // First: auto-detect all key-value pairs using the smart detection
         $detectedPairs = $this->detectKeyValuePairs($rawText);
         $detectedMap = [];
@@ -29,6 +38,33 @@ class OcrParserService
             $key = $field['key'];
             $value = null;
             $mode = $field['extraction_mode'] ?? 'auto';
+
+            // MRZ extraction mode: look up field from parsed MRZ data
+            if ($mode === 'mrz' && $mrzData !== null) {
+                $mrzKey = !empty($field['regex']) ? $field['regex'] : $key;
+                $value = $mrzData[$mrzKey] ?? null;
+
+                if ($value !== null) {
+                    $value = $this->cleanValue($value);
+                    if (!empty($field['transform'])) {
+                        $value = $this->applyTransforms($value, (array) $field['transform']);
+                    }
+                    if (!empty($field['format'])) {
+                        $value = $this->applyFormat($value, $field['format']);
+                    }
+                    if (!empty($field['value_map']) && is_array($field['value_map'])) {
+                        $normalized = mb_strtoupper(trim($value));
+                        foreach ($field['value_map'] as $from => $to) {
+                            if (mb_strtoupper(trim($from)) === $normalized) {
+                                $value = $to;
+                                break;
+                            }
+                        }
+                    }
+                }
+                $result[$key] = $value;
+                continue;
+            }
 
             // 1. Try regex first (most specific, highest accuracy)
             if ($value === null && !empty($field['regex'])) {
@@ -682,8 +718,73 @@ class OcrParserService
     }
 
     /**
-     * Parse Machine Readable Zone (MRZ) lines from passport.
-     * Handles TD3 (passport) format: 2 lines of 44 characters with '<' filler.
+     * Parse MRZ lines into a flat associative array for direct field lookup.
+     * Keys: type, country, surname, given_names, full_name,
+     *       document_number, nationality, date_of_birth, sex, date_of_expiry, optional_data
+     */
+    private function parseMrzFields(string $text): array
+    {
+        $lines = preg_split('/\r?\n/', $text);
+        $mrzLines = [];
+        foreach ($lines as $line) {
+            $line = trim($line);
+            // Allow spaces in OCR output — strip them for MRZ detection
+            $stripped = preg_replace('/\s+/', '', $line);
+            if (preg_match('/^[A-Z0-9<]{30,}$/', $stripped) && substr_count($stripped, '<') >= 5) {
+                $mrzLines[] = $stripped;
+            }
+        }
+
+        if (count($mrzLines) < 2) {
+            return [];
+        }
+
+        $line1 = $mrzLines[count($mrzLines) - 2];
+        $line2 = $mrzLines[count($mrzLines) - 1];
+        $data = [];
+
+        // Line 1: Type(1-2) Country(3) Name(rest)
+        // Passport: P<CTRYNAME<<GIVEN, CI: CIMMRNAME<<GIVEN, ID: I<CTRYNAME<<GIVEN
+        if (preg_match('/^([A-Z])([A-Z<])([A-Z]{3})([A-Z<]+)$/', $line1, $m)) {
+            $typeChar = $m[1];
+            $subtypeChar = $m[2] === '<' ? '' : $m[2];
+            $data['type'] = $typeChar . $subtypeChar;
+            $data['country'] = $m[3];
+
+            $namePart = rtrim($m[4], '<');
+            $nameParts = explode('<<', $namePart, 2);
+            $data['surname'] = str_replace('<', ' ', trim($nameParts[0]));
+            $data['given_names'] = isset($nameParts[1]) ? str_replace('<', ' ', trim($nameParts[1])) : '';
+            $data['full_name'] = trim($data['surname'] . ' ' . $data['given_names']);
+        }
+
+        // Line 2: DocNo(9) Check(1) Nationality(3) DOB(6) Check(1) Sex(1) Expiry(6) Check(1) Optional(15) Check(1)
+        if (strlen($line2) >= 28) {
+            $data['document_number'] = rtrim(substr($line2, 0, 9), '<');
+            $data['nationality'] = substr($line2, 10, 3);
+
+            $dobRaw = substr($line2, 13, 6);
+            if (preg_match('/^\d{6}$/', $dobRaw)) {
+                $data['date_of_birth'] = $this->formatMrzDate($dobRaw);
+            }
+
+            $data['sex'] = substr($line2, 20, 1);
+
+            $expiryRaw = substr($line2, 21, 6);
+            if (preg_match('/^\d{6}$/', $expiryRaw)) {
+                $data['date_of_expiry'] = $this->formatMrzDate($expiryRaw);
+            }
+
+            $data['optional_data'] = rtrim(substr($line2, 28, 15), '<');
+        }
+
+        return $data;
+    }
+
+    /**
+     * Parse Machine Readable Zone (MRZ) lines from passport / travel document.
+     * Handles TD3 format: 2 lines of 44 characters with '<' filler.
+     * Supports P (passport), CI (certificate of identity), and other ICAO types.
      */
     private function parseMrz(string $text): array
     {
@@ -694,8 +795,9 @@ class OcrParserService
         $mrzLines = [];
         foreach ($lines as $line) {
             $line = trim($line);
-            if (preg_match('/^[A-Z0-9<]{30,}$/', $line) && substr_count($line, '<') >= 5) {
-                $mrzLines[] = $line;
+            $stripped = preg_replace('/\s+/', '', $line);
+            if (preg_match('/^[A-Z0-9<]{30,}$/', $stripped) && substr_count($stripped, '<') >= 5) {
+                $mrzLines[] = $stripped;
             }
         }
 
@@ -703,25 +805,27 @@ class OcrParserService
             return $pairs;
         }
 
-        // Use the last 2 MRZ lines (TD3 passport format)
+        // Use the last 2 MRZ lines (TD3 format)
         $line1 = $mrzLines[count($mrzLines) - 2];
         $line2 = $mrzLines[count($mrzLines) - 1];
 
-        // Line 1: P<CTRYNAME<<GIVEN<NAMES<<<<<<<<<<<<<<<<<<
-        // or: PJMMRSAN<YU<KHAING<<<<<<<<<<<<<<<<<<<<<
-        if (preg_match('/^P([A-Z<])([A-Z]{3})([A-Z<]+)$/', $line1, $m)) {
-            $type = rtrim($m[1], '<') ?: '';
-            $country = $m[2];
+        // Line 1: General ICAO TD3 — Type(1) Subtype(1) Country(3) Name(39)
+        // P<CTRYNAME<<GIVEN, CIMMRNAME<<GIVEN, I<CTRYNAME<<GIVEN, etc.
+        if (preg_match('/^([A-Z])([A-Z<])([A-Z]{3})([A-Z<]+)$/', $line1, $m)) {
+            $typeChar = $m[1];
+            $subtypeChar = $m[2] === '<' ? '' : $m[2];
+            $docType = $typeChar . $subtypeChar;
+            $country = $m[3];
 
             // Parse name: split by '<<', first part is surname, rest is given names
-            $namePart = rtrim($m[3], '<');
+            $namePart = rtrim($m[4], '<');
             $nameParts = explode('<<', $namePart, 2);
             $surname = str_replace('<', ' ', trim($nameParts[0]));
             $givenNames = isset($nameParts[1]) ? str_replace('<', ' ', trim($nameParts[1])) : '';
             $fullName = trim($surname . ' ' . $givenNames);
 
-            if ($type) {
-                $pairs[] = ['key' => 'Type (MRZ)', 'value' => 'P' . $type];
+            if ($docType) {
+                $pairs[] = ['key' => 'Type (MRZ)', 'value' => $docType];
             }
             if ($country && $country !== '<<<') {
                 $pairs[] = ['key' => 'Country code (MRZ)', 'value' => $country];
