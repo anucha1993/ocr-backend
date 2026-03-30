@@ -270,8 +270,47 @@ class OcrParserService
                         $value = 'Female';
                     }
                     break;
+                case 'normalize_nationality':
+                    $value = self::fixNationality($value);
+                    break;
             }
         }
+        return $value;
+    }
+
+    /**
+     * Fix common OCR misreads in nationality/country codes.
+     * e.g. LA0 → LAO, KHM with zero → KHM, 1ND → IND
+     */
+    private static function fixNationality(string $value): string
+    {
+        $upper = strtoupper(trim($value));
+
+        // Known OCR misread mappings (digit ↔ letter)
+        $fixes = [
+            'LA0'  => 'LAO',
+            'KHM'  => 'KHM',
+            '1ND'  => 'IND',
+            'MMR'  => 'MMR',
+            'VNM'  => 'VNM',
+            'THA'  => 'THA',
+            'CHN'  => 'CHN',
+            'NPL'  => 'NPL',
+            'PHL'  => 'PHL',
+        ];
+
+        if (isset($fixes[$upper])) {
+            return $fixes[$upper];
+        }
+
+        // Generic fix: for 3-letter codes, replace 0→O, 1→I in likely letter positions
+        if (preg_match('/^[A-Z0-9]{3}$/', $upper)) {
+            $fixed = strtr($upper, ['0' => 'O', '1' => 'I']);
+            if ($fixed !== $upper) {
+                return $fixed;
+            }
+        }
+
         return $value;
     }
 
@@ -999,7 +1038,7 @@ class OcrParserService
                 'key'             => 'nationality',
                 'label'           => 'Nationality',
                 'keywords'        => ['Nationality', 'Citizen'],
-                'regex'           => '(?:Nationality|Citizen(?:ship)?)\s*[:：]?\s*([A-Z][A-Za-z]{2,20})',
+                'regex'           => '(?:Nationality|Citizen(?:ship)?)\s*[:：]?\s*([A-Z0-9][A-Za-z0-9]{2,20})',
                 'extraction_mode' => 'auto',
             ],
             [
