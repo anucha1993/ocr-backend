@@ -35,8 +35,8 @@ class OcrParserService
                 $value = $this->extractByRegex($normalizedText, $field['regex'], $mode);
             }
 
-            // 2. Try matching field keywords against detected pairs
-            if ($value === null && !empty($field['keywords'])) {
+            // 2. Try matching field keywords against detected pairs (skip for prev_line — detected pairs look forward)
+            if ($value === null && $mode !== 'prev_line' && !empty($field['keywords'])) {
                 foreach ($field['keywords'] as $keyword) {
                     $kwLower = mb_strtolower(trim($keyword));
                     $kwNorm = rtrim($kwLower, '.。:：');
@@ -50,8 +50,8 @@ class OcrParserService
                 }
             }
 
-            // 3. Try matching field label against detected pairs
-            if ($value === null && !empty($field['label'])) {
+            // 3. Try matching field label against detected pairs (skip for prev_line)
+            if ($value === null && $mode !== 'prev_line' && !empty($field['label'])) {
                 $labelLower = rtrim(mb_strtolower($field['label']), '.。:：');
                 foreach ($detectedMap as $dKey => $dVal) {
                     $dKeyNorm = rtrim($dKey, '.。:：');
@@ -170,8 +170,8 @@ class OcrParserService
         foreach ($keywords as $keyword) {
             $kwLower = mb_strtolower(trim($keyword));
 
-            // Search in full text — same-line capture (skip for next_line mode)
-            if ($mode !== 'next_line') {
+            // Search in full text — same-line capture (skip for next_line and prev_line mode)
+            if ($mode !== 'next_line' && $mode !== 'prev_line') {
                 $escapedKw = preg_quote($keyword, '/');
                 $pattern = '/' . $escapedKw . '\s*[:：\-]?\s*(.+)/iu';
 
@@ -189,8 +189,8 @@ class OcrParserService
             foreach ($lines as $i => $line) {
                 $lineLower = mb_strtolower($line);
                 if (mb_strpos($lineLower, $kwLower) !== false) {
-                    // Extract text after keyword on the same line (skip for next_line mode)
-                    if ($mode !== 'next_line') {
+                    // Extract text after keyword on the same line (skip for next_line and prev_line mode)
+                    if ($mode !== 'next_line' && $mode !== 'prev_line') {
                         $afterKeyword = mb_substr($line, mb_strpos($lineLower, $kwLower) + mb_strlen($kwLower));
                         $afterKeyword = ltrim($afterKeyword, " \t:：-");
                         $afterKeyword = trim($afterKeyword);
@@ -200,8 +200,18 @@ class OcrParserService
                         }
                     }
 
-                    // Look at next line(s) for value (skip for same_line mode)
-                    if ($mode !== 'same_line') {
+                    // For prev_line mode: look at previous line(s) for value
+                    if ($mode === 'prev_line') {
+                        for ($j = $i - 1; $j >= 0 && $j >= $i - 3; $j--) {
+                            $prevLine = trim($lines[$j]);
+                            if ($prevLine !== '' && !$this->isMrzLine($prevLine)) {
+                                return $prevLine;
+                            }
+                        }
+                    }
+
+                    // Look at next line(s) for value (skip for same_line and prev_line mode)
+                    if ($mode !== 'same_line' && $mode !== 'prev_line') {
                         for ($j = $i + 1; $j < count($lines) && $j <= $i + 2; $j++) {
                             $nextLine = trim($lines[$j]);
                             if ($nextLine !== '') {
@@ -354,8 +364,8 @@ class OcrParserService
             'SEPTEMBER' => '09', 'OCTOBER' => '10', 'NOVEMBER' => '11', 'DECEMBER' => '12',
         ];
 
-        // Pattern: DD MON YYYY or DD-MON-YYYY or DD/MON/YYYY
-        if (preg_match('/^(\d{1,2})[\s\/\-\.]([A-Za-z]+)[\s\/\-\.](\d{4})$/', $value, $m)) {
+        // Pattern: DD MON YYYY or DD-MON-YYYY or DD/MON/YYYY (handles "Dec." with trailing dot)
+        if (preg_match('/^(\d{1,2})[\s\/\-\.]+([A-Za-z]+)\.?[\s\/\-\.]+?(\d{4})$/', $value, $m)) {
             $monthUpper = strtoupper($m[2]);
             if (isset($months[$monthUpper])) {
                 return str_pad($m[1], 2, '0', STR_PAD_LEFT) . '/' . $months[$monthUpper] . '/' . $m[3];
@@ -478,7 +488,7 @@ class OcrParserService
         }
 
         // 2) English month: DD MON YYYY (search within text, not exact match)
-        if (preg_match('/(\d{1,2})[\s\/\-\.]([A-Za-z]+)[\s\/\-\.](\d{4})/u', $value, $m)) {
+        if (preg_match('/(\d{1,2})[\s\/\-\.]+([A-Za-z]+)\.?[\s\/\-\.]+?(\d{4})/u', $value, $m)) {
             $mon = $enMonths[strtoupper($m[2])] ?? null;
             if ($mon !== null) {
                 $year = (int) $m[3];
@@ -787,6 +797,9 @@ class OcrParserService
             // Thai ID
             'เลขประจำตัวประชาชน', 'ชื่อ', 'นามสกุล', 'วันเกิด', 'ที่อยู่', 'วันออกบัตร', 'วันบัตรหมดอายุ',
             'Name', 'Last name', 'Date of Birth', 'Date of Issue', 'Date of Expiry',
+            // Non-Thai ID card (บัตรประจำตัวคนซึ่งไม่มีสัญชาติไทย)
+            'เกิดวันที่', 'เกิดวันที', 'วันหมดอายุ', 'เลขที่บัตร',
+            'Card No', 'Card No.', 'ID Card No',
             // Thai Work Permit
             'ใบอนุญาตทำงานเลขที่', 'ชื่อผู้รับอนุญาตให้ทำงาน', 'วัน เดือน ปีเกิด', 'สัญชาติ',
             'ประเภทงานที่ได้รับอนุญาต', 'วันออกใบอนุญาตทำงาน', 'วันสิ้นสุดใบอนุญาตทำงาน',

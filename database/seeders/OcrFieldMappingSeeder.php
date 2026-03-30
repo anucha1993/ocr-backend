@@ -85,5 +85,86 @@ class OcrFieldMappingSeeder extends Seeder
                 'is_active' => true,
             ]
         );
+
+        // Non-Thai Identification Card (บัตรประจำตัวคนซึ่งไม่มีสัญชาติไทย)
+        OcrFieldMapping::updateOrCreate(
+            ['name' => 'Non-Thai ID Card'],
+            [
+                'fields' => [
+                    [
+                        'key'             => 'card_number',
+                        'label'           => 'Card Number (เลขที่บัตร)',
+                        'keywords'        => [],
+                        'regex'           => '(\d{2}\s*\d{4}\s*\d{5,7}\s*\d?)',
+                        'extraction_mode' => 'auto',
+                    ],
+                    [
+                        'key'             => 'side_number',
+                        'label'           => 'Side Number (เลขข้างบัตร)',
+                        'keywords'        => [],
+                        'regex'           => '(\d{4}[\-\x{2010}\x{2011}\x{2012}\x{2013}\x{2014}\x{2015}]\d{7})',
+                        'extraction_mode' => 'auto',
+                    ],
+                    [
+                        'key'             => 'nationality',
+                        'label'           => 'Nationality (สัญชาติ)',
+                        'keywords'        => ['NON THAI IDENTIFICATION CARD', 'ไม่มีสัญชาติไทย'],
+                        'regex'           => null,
+                        'extraction_mode' => 'next_line',
+                    ],
+                    [
+                        'key'             => 'name_th',
+                        'label'           => 'Name Thai (ชื่อ)',
+                        'keywords'        => ['ชื่อ'],
+                        'regex'           => null,
+                        'extraction_mode' => 'same_line',
+                    ],
+                    [
+                        'key'             => 'name_en',
+                        'label'           => 'Name English',
+                        'keywords'        => ['Name'],
+                        'regex'           => 'Name\s+(.+)',
+                        'extraction_mode' => 'same_line',
+                    ],
+                    [
+                        'key'             => 'date_of_birth',
+                        'label'           => 'Date of Birth (เกิดวันที่)',
+                        'keywords'        => ['Date of Birth', 'เกิดวันที่', 'เกิดวันที'],
+                        'regex'           => 'Date of Birth\s+(\d{1,2}\s+\w+\.?\s+\d{4})',
+                        'extraction_mode' => 'same_line',
+                    ],
+                    [
+                        'key'             => 'address',
+                        'label'           => 'Address (ที่อยู่)',
+                        'keywords'        => ['ที่อยู่'],
+                        'regex'           => null,
+                        'extraction_mode' => 'same_line',
+                    ],
+                    [
+                        'key'             => 'date_of_issue',
+                        'label'           => 'Date of Issue (วันออกบัตร)',
+                        'keywords'        => ['วันออกบัตร'],
+                        'regex'           => null,
+                        'extraction_mode' => 'next_line',
+                    ],
+                    [
+                        'key'             => 'date_of_expiry',
+                        'label'           => 'Date of Expiry (วันหมดอายุ)',
+                        'keywords'        => ['Date of Expiry', 'วันบัตรหมดอายุ'],
+                        'regex'           => null,
+                        'extraction_mode' => 'prev_line',
+                    ],
+                ],
+                'detection_landmarks' => [
+                    ['type' => 'keyword',     'value' => 'NON THAI IDENTIFICATION CARD', 'weight' => 100],
+                    ['type' => 'keyword',     'value' => 'บัตรประจำตัวคนซึ่งไม่มีสัญชาติไทย', 'weight' => 100],
+                    ['type' => 'keyword',     'value' => 'วันออกบัตร',  'weight' => 15],
+                    ['type' => 'keyword',     'value' => 'เกิดวันที',   'weight' => 15],
+                    ['type' => 'not_keyword', 'value' => 'PASSPORT',    'weight' => 50],
+                    ['type' => 'not_keyword', 'value' => 'เลขประจำตัวประชาชน', 'weight' => 50],
+                ],
+                'is_active' => true,
+            ]
+        );
     }
 }
