@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\AuditService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -27,6 +28,8 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
+        AuditService::log('login', 'User', $user->id);
+
         return response()->json([
             'user' => [
                 'id' => $user->id,
@@ -40,6 +43,7 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
+        AuditService::log('logout', 'User', $request->user()->id);
         $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Logged out']);

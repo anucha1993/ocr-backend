@@ -35,9 +35,10 @@ class Labour extends Model
     protected function casts(): array
     {
         return [
-            'birthdate' => 'date',
-            'issue_date' => 'date',
+            'birthdate'   => 'date',
+            'issue_date'  => 'date',
             'expiry_date' => 'date',
+            'address'     => 'encrypted',
         ];
     }
 }

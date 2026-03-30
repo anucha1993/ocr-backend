@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Labour;
 use App\Models\ScanBatch;
+use App\Services\AuditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -112,6 +113,8 @@ class ScanBatchController extends Controller
 
             $batch->load('labours');
 
+            AuditService::logCreated($batch);
+
             return response()->json([
                 'message' => "บันทึกชุด \"{$batch->name}\" สำเร็จ ({$batch->total_count} รายการ)",
                 'batch'   => $batch,
@@ -140,6 +143,7 @@ class ScanBatchController extends Controller
     public function destroy(ScanBatch $scanBatch, Request $request): JsonResponse
     {
         abort_if($scanBatch->user_id !== $request->user()->id, 403, 'ไม่มีสิทธิ์ลบข้อมูลนี้');
+        AuditService::logDeleted($scanBatch);
         // Detach labours (set batch_id to null) then delete batch
         $scanBatch->labours()->update(['batch_id' => null]);
         $scanBatch->delete();

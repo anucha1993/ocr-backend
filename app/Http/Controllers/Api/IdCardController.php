@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Labour;
+use App\Services\AuditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -30,6 +31,7 @@ class IdCardController extends Controller
 
     public function destroy(Labour $labour): JsonResponse
     {
+        AuditService::logDeleted($labour);
         $labour->delete();
 
         return response()->json(['message' => 'ลบข้อมูลสำเร็จ']);
@@ -68,6 +70,8 @@ class IdCardController extends Controller
         } else {
             return response()->json(['โดยย่อ' => 'กรุณาระบุเลขบัตรประชาชนหรือเลข Passport'], 422);
         }
+
+        AuditService::logCreated($labour);
 
         return response()->json([
             'ผล' => $labour->wasRecentlyCreated ? 'เพิ่มข้อมูลเรียบร้อย' : 'อัปเดตข้อมูลเรียบร้อย',

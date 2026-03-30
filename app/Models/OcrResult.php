@@ -16,6 +16,7 @@ class OcrResult extends Model
         'raw_text',
         'extracted_data',
         'ocr_confidence',
+        'validation',
         'field_mapping_id',
         'status',
         'error_message',
@@ -24,6 +25,7 @@ class OcrResult extends Model
 
     protected $casts = [
         'extracted_data'  => 'array',
+        'validation'      => 'array',
         'page_count'      => 'integer',
         'page_number'     => 'integer',
         'ocr_confidence'  => 'float',

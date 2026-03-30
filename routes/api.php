@@ -4,10 +4,12 @@ use App\Http\Controllers\Api\ApiEndpointApiController;
 use App\Http\Controllers\Api\ApiProviderApiController;
 use App\Http\Controllers\Api\ApiTestApiController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\DashboardApiController;
 use App\Http\Controllers\Api\ForeignDataController;
 use App\Http\Controllers\Api\IdCardController;
 use App\Http\Controllers\Api\IdCardReaderSettingController;
+use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OcrController;
 use App\Http\Controllers\Api\PassportMappingController;
 use App\Http\Controllers\Api\ScanBatchController;
@@ -52,6 +54,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/idcard-reader-settings', [IdCardReaderSettingController::class, 'show']);
     Route::put('/idcard-reader-settings', [IdCardReaderSettingController::class, 'update']);
 
+    // Notifications
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [NotificationController::class, 'index']);
+        Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::patch('/{notification}/read', [NotificationController::class, 'markAsRead']);
+        Route::post('/read-all', [NotificationController::class, 'markAllAsRead']);
+        Route::delete('/{notification}', [NotificationController::class, 'destroy']);
+    });
+
     // Passport Mappings
     Route::apiResource('passport-mappings', PassportMappingController::class)->parameters([
         'passport-mappings' => 'passportMapping',
@@ -59,8 +70,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ─── OCR Processing ────────────────────────────────────
     Route::prefix('ocr')->group(function () {
-        // Process files (upload + OCR)
-        Route::post('/process', [OcrController::class, 'process']);
+        // Process files (upload + OCR) — rate limited to control Cloud API costs
+        Route::middleware('throttle:20,1')->post('/process', [OcrController::class, 'process']);
 
         // Preview OCR (Smart Scan template builder)
         Route::post('/preview', [OcrController::class, 'preview']);
@@ -99,6 +110,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Dashboard
         Route::get('/dashboard/stats', [DashboardApiController::class, 'stats']);
+
+        // Audit Logs
+        Route::get('/audit-logs', [AuditLogController::class, 'index']);
+        Route::get('/audit-logs/stats', [AuditLogController::class, 'stats']);
 
         // API Providers
         Route::apiResource('providers', ApiProviderApiController::class);

@@ -10,6 +10,7 @@ use App\Models\ScanBatch;
 use App\Services\GoogleVisionService;
 use App\Services\OcrExcelExportService;
 use App\Services\OcrParserService;
+use App\Services\OcrValidationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -174,11 +175,13 @@ class OcrController extends Controller
                         try {
                             $extractedData = $parserService->extract($pageText, $pageFields);
                             $confidence = $pageConfidences[$pageIndex] ?? null;
+                            $validation = OcrValidationService::validate($extractedData);
 
                             $ocrResult->update([
                                 'raw_text'       => $pageText,
                                 'extracted_data' => $extractedData,
                                 'ocr_confidence' => $confidence,
+                                'validation'     => $validation,
                                 'status'         => 'completed',
                             ]);
                         } catch (\Throwable $e) {
@@ -391,7 +394,7 @@ class OcrController extends Controller
             'fields.*.regex'    => 'nullable|string|max:500',
             'fields.*.extraction_mode' => 'nullable|string|in:auto,same_line,next_line',
             'fields.*.transform'   => 'nullable|array',
-            'fields.*.transform.*' => 'string|in:remove_spaces,uppercase,lowercase,trim,digits_only,alphanumeric',
+            'fields.*.transform.*' => 'string|in:remove_spaces,uppercase,lowercase,trim,digits_only,alphanumeric,normalize_gender',
             'fields.*.format'      => 'nullable|string|max:100',
             'detection_landmarks'            => 'nullable|array',
             'detection_landmarks.*.type'     => 'required|string|in:mrz,keyword,regex,not_keyword',
@@ -422,7 +425,7 @@ class OcrController extends Controller
             'fields.*.regex'    => 'nullable|string|max:500',
             'fields.*.extraction_mode' => 'nullable|string|in:auto,same_line,next_line',
             'fields.*.transform'   => 'nullable|array',
-            'fields.*.transform.*' => 'string|in:remove_spaces,uppercase,lowercase,trim,digits_only,alphanumeric',
+            'fields.*.transform.*' => 'string|in:remove_spaces,uppercase,lowercase,trim,digits_only,alphanumeric,normalize_gender',
             'fields.*.format'      => 'nullable|string|max:100',
             'detection_landmarks'            => 'nullable|array',
             'detection_landmarks.*.type'     => 'required|string|in:mrz,keyword,regex,not_keyword',
