@@ -77,6 +77,16 @@ class OcrParserService
                 if (!empty($field['format'])) {
                     $value = $this->applyFormat($value, $field['format']);
                 }
+                // Apply custom value mapping
+                if (!empty($field['value_map']) && is_array($field['value_map'])) {
+                    $normalized = mb_strtoupper(trim($value));
+                    foreach ($field['value_map'] as $from => $to) {
+                        if (mb_strtoupper(trim($from)) === $normalized) {
+                            $value = $to;
+                            break;
+                        }
+                    }
+                }
             }
             $result[$key] = $value;
         }
