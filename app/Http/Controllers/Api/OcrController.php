@@ -7,6 +7,7 @@ use App\Models\Labour;
 use App\Models\OcrFieldMapping;
 use App\Models\OcrResult;
 use App\Models\ScanBatch;
+use App\Services\ExternalApiService;
 use App\Services\GoogleVisionService;
 use App\Services\OcrExcelExportService;
 use App\Services\OcrParserService;
@@ -24,6 +25,7 @@ class OcrController extends Controller
         private GoogleVisionService $visionService,
         private OcrParserService $parserService,
         private OcrExcelExportService $excelService,
+        private ExternalApiService $apiService,
     ) {}
 
     /**
@@ -38,7 +40,10 @@ class OcrController extends Controller
             'files'            => 'required|array|min:1',
             'files.*'          => 'required|file|mimes:pdf,jpg,jpeg,png,tiff,tif,bmp,webp|max:51200',
             'field_mapping_id' => 'nullable|exists:ocr_field_mappings,id',
+            'zoho_check'       => 'nullable|boolean',
         ]);
+
+        $zohoCheck = (bool) $request->input('zoho_check', false);
 
         $batchId = Str::uuid()->toString();
         $fieldMapping = null;
@@ -67,11 +72,18 @@ class OcrController extends Controller
 
         $visionService = $this->visionService;
         $parserService = $this->parserService;
+        $apiService = $this->apiService;
 
         return response()->stream(function () use (
             $batchId, $fieldMapping, $fields, $autoDetect,
-            $fileMetas, $visionService, $parserService, $request
+            $fileMetas, $visionService, $parserService, $request,
+            $zohoCheck, $apiService
         ) {
+            // Release session lock so other API requests (e.g. Zoho search) are not blocked
+            if (session()->isStarted()) {
+                session()->save();
+            }
+
             // Disable output buffering for real-time streaming
             while (ob_get_level()) ob_end_flush();
 
@@ -93,121 +105,53 @@ class OcrController extends Controller
                 ]);
 
                 try {
-                    $ocrData = $visionService->ocr($tempPath, $mimeType);
+                    $isPdf = $mimeType === 'application/pdf';
 
-                    $pageTexts = $ocrData['page_texts'] ?? [$ocrData['text']];
-                    $totalPages = $ocrData['pages'];
-                    $pageConfidences = $ocrData['page_confidences'] ?? [];
+                    if ($isPdf) {
+                        // ── PDF: OCR page-by-page for real-time streaming ──
+                        $totalPages = $visionService->pdfPageCount($tempPath);
 
-                    // Send: OCR complete, starting page processing
-                    $this->sendEvent([
-                        'event'      => 'ocr_done',
-                        'file'       => $originalName,
-                        'total_pages' => $totalPages,
-                    ]);
-
-                    foreach ($pageTexts as $pageIndex => $pageText) {
-                        $pageNum = $pageIndex + 1;
-
-                        // Skip blank pages
-                        if (mb_strlen(trim($pageText)) < 20) {
-                            $this->sendEvent([
-                                'event' => 'page_skip',
-                                'file'  => $originalName,
-                                'page'  => $pageNum,
-                                'total' => $totalPages,
-                                'reason' => 'blank',
-                            ]);
-                            continue;
-                        }
-
-                        // Determine template
-                        $pageMapping = $fieldMapping;
-                        $pageFields = $fields;
-                        if ($autoDetect) {
-                            $detected = $parserService->detectDocumentType($pageText);
-                            if ($detected) {
-                                $pageMapping = $detected;
-                                $pageFields = $detected->fields;
-                            } elseif (count($pageTexts) > 1) {
-                                $this->sendEvent([
-                                    'event' => 'page_skip',
-                                    'file'  => $originalName,
-                                    'page'  => $pageNum,
-                                    'total' => $totalPages,
-                                    'reason' => 'no_match',
-                                ]);
-                                continue;
-                            }
-                        }
-
-                        // Landmark check for multi-page
-                        if (count($pageTexts) > 1 && $pageMapping) {
-                            $landmarks = $pageMapping->detection_landmarks ?? [];
-                            if (!empty($landmarks)) {
-                                $pageScore = $parserService->scoreLandmarks($pageText, $landmarks);
-                                if ($pageScore < 50) {
-                                    $this->sendEvent([
-                                        'event' => 'page_skip',
-                                        'file'  => $originalName,
-                                        'page'  => $pageNum,
-                                        'total' => $totalPages,
-                                        'reason' => 'low_score',
-                                    ]);
-                                    continue;
-                                }
-                            }
-                        }
-
-                        $ocrResult = OcrResult::create([
-                            'batch_id'          => $batchId,
-                            'original_filename' => count($pageTexts) > 1
-                                ? "{$originalName} (p.{$pageNum})"
-                                : $originalName,
-                            'file_type'         => $fileExt,
-                            'page_count'        => $totalPages,
-                            'page_number'       => $pageNum,
-                            'field_mapping_id'  => $pageMapping?->id,
-                            'status'            => 'processing',
-                            'user_id'           => $request->user()?->id,
-                        ]);
-
-                        try {
-                            $extractedData = $parserService->extract($pageText, $pageFields);
-                            $confidence = $pageConfidences[$pageIndex] ?? null;
-                            $validation = OcrValidationService::validate($extractedData);
-
-                            $ocrResult->update([
-                                'raw_text'       => $pageText,
-                                'extracted_data' => $extractedData,
-                                'ocr_confidence' => $confidence,
-                                'validation'     => $validation,
-                                'status'         => 'completed',
-                            ]);
-                        } catch (\Throwable $e) {
-                            Log::error('OCR page processing failed', [
-                                'file'  => $originalName,
-                                'page'  => $pageNum,
-                                'error' => $e->getMessage(),
-                            ]);
-                            $ocrResult->update([
-                                'status'        => 'failed',
-                                'error_message' => $e->getMessage(),
-                            ]);
-                        }
-
-                        $freshResult = $ocrResult->fresh()->load('fieldMapping');
-                        $results[] = $freshResult;
-
-                        // Send: page done — include result data for real-time display
                         $this->sendEvent([
-                            'event'  => 'page_done',
-                            'file'   => $originalName,
-                            'page'   => $pageNum,
-                            'total'  => $totalPages,
-                            'status' => $ocrResult->status,
-                            'result' => $freshResult,
+                            'event'      => 'ocr_start',
+                            'file'       => $originalName,
+                            'total_pages' => $totalPages,
                         ]);
+
+                        $visionService->ocrPdfPageByPage(
+                            $tempPath,
+                            function (int $pageNum, int $total, string $pageText, ?float $confidence) use (
+                                &$results, $batchId, $originalName, $fileExt,
+                                $fieldMapping, $fields, $autoDetect,
+                                $parserService, $request, $zohoCheck, $apiService
+                            ) {
+                                $this->processAndStreamPage(
+                                    $results, $batchId, $originalName, $fileExt,
+                                    $pageNum, $total, $pageText, $confidence,
+                                    $fieldMapping, $fields, $autoDetect,
+                                    $parserService, $request, $total > 1,
+                                    $zohoCheck, $apiService
+                                );
+                            }
+                        );
+                    } else {
+                        // ── Image: single page, OCR then process ──
+                        $ocrData = $visionService->ocrImage($tempPath);
+                        $pageText   = $ocrData['page_texts'][0] ?? $ocrData['text'];
+                        $confidence = $ocrData['page_confidences'][0] ?? null;
+
+                        $this->sendEvent([
+                            'event'      => 'ocr_done',
+                            'file'       => $originalName,
+                            'total_pages' => 1,
+                        ]);
+
+                        $this->processAndStreamPage(
+                            $results, $batchId, $originalName, $fileExt,
+                            1, 1, $pageText, $confidence,
+                            $fieldMapping, $fields, $autoDetect,
+                            $parserService, $request, false,
+                            $zohoCheck, $apiService
+                        );
                     }
 
                 } catch (\Throwable $e) {
@@ -253,6 +197,174 @@ class OcrController extends Controller
             'Cache-Control'     => 'no-cache',
             'X-Accel-Buffering' => 'no',
         ]);
+    }
+
+    /**
+     * Process a single page of OCR text: detect template, extract fields,
+     * save to DB, and stream the result event.
+     */
+    private function processAndStreamPage(
+        array &$results,
+        string $batchId,
+        string $originalName,
+        string $fileExt,
+        int $pageNum,
+        int $totalPages,
+        string $pageText,
+        ?float $confidence,
+        ?OcrFieldMapping $fieldMapping,
+        array $fields,
+        bool $autoDetect,
+        OcrParserService $parserService,
+        Request $request,
+        bool $isMultiPage,
+        bool $zohoCheck = false,
+        ?ExternalApiService $apiService = null,
+    ): void {
+        // Skip blank pages
+        if (mb_strlen(trim($pageText)) < 20) {
+            $this->sendEvent([
+                'event'  => 'page_skip',
+                'file'   => $originalName,
+                'page'   => $pageNum,
+                'total'  => $totalPages,
+                'reason' => 'blank',
+            ]);
+            return;
+        }
+
+        // Determine template
+        $pageMapping = $fieldMapping;
+        $pageFields = $fields;
+        if ($autoDetect) {
+            $detected = $parserService->detectDocumentType($pageText);
+            if ($detected) {
+                $pageMapping = $detected;
+                $pageFields = $detected->fields;
+            } elseif ($isMultiPage) {
+                $this->sendEvent([
+                    'event'  => 'page_skip',
+                    'file'   => $originalName,
+                    'page'   => $pageNum,
+                    'total'  => $totalPages,
+                    'reason' => 'no_match',
+                ]);
+                return;
+            }
+        }
+
+        // Landmark check for multi-page
+        if ($isMultiPage && $pageMapping) {
+            $landmarks = $pageMapping->detection_landmarks ?? [];
+            if (!empty($landmarks)) {
+                $pageScore = $parserService->scoreLandmarks($pageText, $landmarks);
+                if ($pageScore < 50) {
+                    $this->sendEvent([
+                        'event'  => 'page_skip',
+                        'file'   => $originalName,
+                        'page'   => $pageNum,
+                        'total'  => $totalPages,
+                        'reason' => 'low_score',
+                    ]);
+                    return;
+                }
+            }
+        }
+
+        $ocrResult = OcrResult::create([
+            'batch_id'          => $batchId,
+            'original_filename' => $isMultiPage
+                ? "{$originalName} (p.{$pageNum})"
+                : $originalName,
+            'file_type'         => $fileExt,
+            'page_count'        => $totalPages,
+            'page_number'       => $pageNum,
+            'field_mapping_id'  => $pageMapping?->id,
+            'status'            => 'processing',
+            'user_id'           => $request->user()?->id,
+        ]);
+
+        try {
+            $extractedData = $parserService->extract($pageText, $pageFields);
+            $validation = OcrValidationService::validate($extractedData);
+
+            $ocrResult->update([
+                'raw_text'       => $pageText,
+                'extracted_data' => $extractedData,
+                'ocr_confidence' => $confidence,
+                'validation'     => $validation,
+                'status'         => 'completed',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('OCR page processing failed', [
+                'file'  => $originalName,
+                'page'  => $pageNum,
+                'error' => $e->getMessage(),
+            ]);
+            $ocrResult->update([
+                'status'        => 'failed',
+                'error_message' => $e->getMessage(),
+            ]);
+        }
+
+        $freshResult = $ocrResult->fresh()->load('fieldMapping');
+        $results[] = $freshResult;
+
+        // Zoho CRM check if requested
+        $zohoData = null;
+        if ($zohoCheck && $apiService && $ocrResult->status === 'completed') {
+            $zohoData = $this->lookupZoho($ocrResult->extracted_data, $apiService);
+        }
+
+        // Send: page done — include result data for real-time display
+        $eventData = [
+            'event'  => 'page_done',
+            'file'   => $originalName,
+            'page'   => $pageNum,
+            'total'  => $totalPages,
+            'status' => $ocrResult->status,
+            'result' => $freshResult,
+        ];
+        if ($zohoCheck) {
+            $eventData['zoho_data'] = $zohoData; // null = not found, object = found
+        }
+        $this->sendEvent($eventData);
+    }
+
+    /**
+     * Look up a passport number in Zoho CRM and return the first matching record, or null.
+     */
+    private function lookupZoho(?array $extractedData, ExternalApiService $apiService): ?array
+    {
+        if (!$extractedData) return null;
+
+        $passportNo = $extractedData['passport_no']
+            ?? $extractedData['passport_number']
+            ?? $extractedData['coi_number']
+            ?? $extractedData['document_number']
+            ?? '';
+
+        $passportNo = trim($passportNo);
+        if ($passportNo === '') return null;
+
+        try {
+            $result = $apiService->callEndpoint(
+                'zoho-crm',
+                'Search Lead',
+                ['criteria' => "(Passport_ID:equals:{$passportNo})"],
+            );
+
+            if ($result['success'] && !empty($result['data']['data'])) {
+                return $result['data']['data'][0];
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Zoho lookup failed during OCR stream', [
+                'passport_no' => $passportNo,
+                'error'       => $e->getMessage(),
+            ]);
+        }
+
+        return null;
     }
 
     /**

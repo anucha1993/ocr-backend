@@ -57,6 +57,7 @@ class PassportCISeeder extends Seeder
                         'extraction_mode' => 'mrz',
                         'transform'       => ['normalize_nationality'],
                     ],
+                    
                     [
                         'key'             => 'date_of_birth',
                         'label'           => 'Date of Birth',

@@ -378,4 +378,40 @@ class GoogleVisionService
 
         return $this->ocrImage($filePath);
     }
+
+    /**
+     * OCR a PDF page-by-page, calling $onPage after each page is done.
+     * This enables real-time streaming of results.
+     *
+     * @param string   $filePath  Path to the PDF.
+     * @param callable $onPage    fn(int $pageNum, int $totalPages, string $text, ?float $confidence): void
+     */
+    public function ocrPdfPageByPage(string $filePath, callable $onPage): void
+    {
+        $totalPages = $this->getPdfPageCount($filePath);
+        $totalPages = min($totalPages, 100);
+
+        for ($page = 1; $page <= $totalPages; $page++) {
+            $chunkPath = $this->extractPdfPages($filePath, $page, $page);
+            try {
+                $result = $this->ocrSmallPdf($chunkPath);
+                $text       = $result['page_texts'][0] ?? '';
+                $confidence = $result['page_confidences'][0] ?? null;
+                $onPage($page, $totalPages, $text, $confidence);
+            } catch (\Throwable $e) {
+                Log::warning("ocrPdfPageByPage: page {$page} failed", ['error' => $e->getMessage()]);
+                $onPage($page, $totalPages, '', null);
+            } finally {
+                @unlink($chunkPath);
+            }
+        }
+    }
+
+    /**
+     * Get the number of pages in a PDF (public wrapper).
+     */
+    public function pdfPageCount(string $filePath): int
+    {
+        return $this->getPdfPageCount($filePath);
+    }
 }
