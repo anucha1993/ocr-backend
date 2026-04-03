@@ -84,8 +84,15 @@ class OcrController extends Controller
                 session()->save();
             }
 
-            // Disable output buffering for real-time streaming
-            while (ob_get_level()) ob_end_flush();
+            // Disable ALL output buffering for real-time streaming
+            @ini_set('output_buffering', '0');
+            @ini_set('zlib.output_compression', '0');
+            while (ob_get_level()) ob_end_clean();
+            ob_implicit_flush(true);
+
+            // Send padding to push past proxy buffers (4KB threshold)
+            echo str_repeat(' ', 4096) . "\n";
+            flush();
 
             $results = [];
             $totalFiles = count($fileMetas);
@@ -193,9 +200,11 @@ class OcrController extends Controller
             ]);
 
         }, 200, [
-            'Content-Type'      => 'text/plain; charset=utf-8',
-            'Cache-Control'     => 'no-cache',
-            'X-Accel-Buffering' => 'no',
+            'Content-Type'      => 'text/event-stream; charset=utf-8',
+            'Cache-Control'     => 'no-cache, no-store, must-revalidate',
+            'X-Accel-Buffering' => 'no',           // Nginx
+            'X-Content-Type-Options' => 'nosniff',  // Prevent MIME sniffing that delays streaming
+            'Connection'        => 'keep-alive',
         ]);
     }
 
@@ -372,6 +381,7 @@ class OcrController extends Controller
      */
     private function sendEvent(array $data): void
     {
+        if (connection_aborted()) return;
         echo json_encode($data, JSON_UNESCAPED_UNICODE) . "\n";
         flush();
     }

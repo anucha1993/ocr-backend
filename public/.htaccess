@@ -23,3 +23,19 @@
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
 </IfModule>
+
+# ─── Disable Apache output buffering for streaming responses ───
+<IfModule mod_deflate.c>
+    # Disable gzip compression for streaming endpoints (prevents buffering)
+    SetEnvIfNoCase Request_URI "^/api/ocr/process" no-gzip
+</IfModule>
+
+# Disable mod_fcgid buffering if present
+<IfModule mod_fcgid.c>
+    FcgidOutputBufferSize 0
+</IfModule>
+
+# Disable mod_proxy_fcgi buffering if present
+<IfModule mod_proxy_fcgi.c>
+    SetEnv proxy-sendcl 1
+</IfModule>
