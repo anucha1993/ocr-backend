@@ -16,7 +16,7 @@ class CorsMiddleware
             $response = $next($request);
         }
 
-        $raw = env('CORS_ALLOWED_ORIGINS', 'http://localhost:3000');
+        $raw = config('app.cors_allowed_origins', 'http://localhost:3000');
         $allowedOrigins = array_map('trim', explode(',', $raw));
 
         $origin = $request->header('Origin');
