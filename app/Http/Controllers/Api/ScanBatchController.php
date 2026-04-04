@@ -161,7 +161,7 @@ class ScanBatchController extends Controller
         $sheet->setTitle('Batch Export');
 
         // Header row
-        $headers = ['#', 'ประเภท', 'เลข Passport', 'ชื่อ', 'นามสกุล', 'สัญชาติ', 'วันเกิด', 'วันออกเอกสาร', 'วันหมดอายุ'];
+        $headers = ['#', 'ประเภท', 'เลข Passport', 'ชื่อ', 'นามสกุล', 'สัญชาติ', 'เพศ', 'วันเกิด', 'สถานที่ออก', 'วันออกเอกสาร', 'วันหมดอายุ'];
         $col = 'A';
         foreach ($headers as $header) {
             $sheet->setCellValue($col . '1', $header);
@@ -180,15 +180,23 @@ class ScanBatchController extends Controller
         // Data rows
         $row = 2;
         foreach ($scanBatch->labours as $i => $labour) {
+            $docLabel = match(strtoupper($labour->document_type ?? '')) {
+                'PJ' => 'PJ (Passport)',
+                'CI' => 'CI (บัตร ปชช.)',
+                'P', 'PASSPORT' => 'Passport',
+                default => $labour->document_type ?? '',
+            };
             $sheet->setCellValue("A{$row}", $i + 1);
-            $sheet->setCellValue("B{$row}", $labour->document_type === 'passport' ? 'Passport' : 'บัตร ปชช.');
+            $sheet->setCellValue("B{$row}", $docLabel);
             $sheet->setCellValueExplicit("C{$row}", $labour->passport_no ?? '', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
             $sheet->setCellValue("D{$row}", $labour->firstname);
             $sheet->setCellValue("E{$row}", $labour->lastname);
             $sheet->setCellValue("F{$row}", $labour->nationality ?? '');
-            $sheet->setCellValue("G{$row}", $labour->birthdate?->format('d/m/Y') ?? '');
-            $sheet->setCellValue("H{$row}", $labour->issue_date?->format('d/m/Y') ?? '');
-            $sheet->setCellValue("I{$row}", $labour->expiry_date?->format('d/m/Y') ?? '');
+            $sheet->setCellValue("G{$row}", $labour->gender ?? '');
+            $sheet->setCellValue("H{$row}", $labour->birthdate?->format('d/m/Y') ?? '');
+            $sheet->setCellValue("I{$row}", $labour->issue_place ?? '');
+            $sheet->setCellValue("J{$row}", $labour->issue_date?->format('d/m/Y') ?? '');
+            $sheet->setCellValue("K{$row}", $labour->expiry_date?->format('d/m/Y') ?? '');
             $row++;
         }
 

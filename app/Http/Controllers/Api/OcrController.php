@@ -607,7 +607,7 @@ class OcrController extends Controller
         $user = $request->user();
         $visibility = $request->input('visibility', 'private');
 
-        // ดึง OCR results ที่ completed ของ batch นี้
+        // ดึง OCR results ที่ completed ของ batch นี้ (พร้อม field mapping)
         $query = OcrResult::where('batch_id', $batchId)
             ->where('user_id', $user->id)
             ->where('status', 'completed')
@@ -624,7 +624,6 @@ class OcrController extends Controller
         }
 
         return DB::transaction(function () use ($ocrResults, $batchId, $request, $user, $visibility) {
-            // สร้าง ScanBatch ใหม่เพื่อกลุ่ม
             $scanBatch = ScanBatch::create([
                 'user_id'     => $user->id,
                 'name'        => $request->input('batch_name'),
@@ -639,32 +638,23 @@ class OcrController extends Controller
 
             foreach ($ocrResults as $result) {
                 $data = $result->extracted_data ?? [];
+                $labourData = $this->mapExtractedToLabour($data, $result);
 
-                // Map OCR fields → Labour fields
-                $labourData = [
-                    'user_id'       => $user->id,
-                    'batch_id'      => $scanBatch->id,
-                    'visibility'    => $visibility,
-                    'document_type' => $data['document_type'] ?? null,
-                    'id_card'       => $data['id_card'] ?? $data['id_number'] ?? null,
-                    'passport_no'   => $data['passport_no'] ?? $data['passport_number'] ?? null,
-                    'prefix'        => $data['prefix'] ?? $data['title'] ?? null,
-                    'firstname'     => $data['firstname'] ?? $data['given_names'] ?? $data['first_name'] ?? null,
-                    'middlename'    => $data['middlename'] ?? $data['middle_name'] ?? null,
-                    'lastname'      => $data['lastname'] ?? $data['surname'] ?? $data['last_name'] ?? null,
-                    'firstname_en'  => $data['firstname_en'] ?? null,
-                    'lastname_en'   => $data['lastname_en'] ?? null,
-                    'birthdate'     => $this->parseDate($data['birthdate'] ?? $data['date_of_birth'] ?? null),
-                    'gender'        => $data['gender'] ?? $data['sex'] ?? null,
-                    'nationality'   => $data['nationality'] ?? null,
-                    'address'       => $data['address'] ?? null,
-                    'issue_date'    => $this->parseDate($data['issue_date'] ?? $data['date_of_issue'] ?? null),
-                    'expiry_date'   => $this->parseDate($data['expiry_date'] ?? $data['date_of_expiry'] ?? null),
-                    'issue_place'   => $data['issue_place'] ?? $data['place_of_issue'] ?? null,
-                ];
+                $labourData['user_id']    = $user->id;
+                $labourData['batch_id']   = $scanBatch->id;
+                $labourData['visibility'] = $visibility;
+
+                // Parse date fields
+                foreach (['birthdate', 'issue_date', 'expiry_date'] as $dateField) {
+                    if (!empty($labourData[$dateField])) {
+                        $labourData[$dateField] = $this->parseDate($labourData[$dateField]);
+                    }
+                }
 
                 // ต้องมีชื่ออย่างน้อย
-                if (empty($labourData['firstname']) && empty($labourData['lastname'])) {
+                $hasName = !empty($labourData['firstname']) || !empty($labourData['lastname'])
+                        || !empty($labourData['firstname_en']) || !empty($labourData['lastname_en']);
+                if (!$hasName) {
                     $skipped++;
                     continue;
                 }
@@ -701,12 +691,112 @@ class OcrController extends Controller
     }
 
     /**
-     * Safe date parse — returns null if invalid.
+     * Dynamically map extracted OCR data → Labour model fields.
+     * Maps OCR extracted data → Labour columns.
+     * Uses `labour_field` from template if available, otherwise falls back to alias map.
+     */
+    private function mapExtractedToLabour(array $data, OcrResult $result): array
+    {
+        // Build key→labour_field from template (if labour_field is set)
+        $keyToLabour = [];
+        if ($result->field_mapping_id) {
+            $fieldMapping = OcrFieldMapping::find($result->field_mapping_id);
+            if ($fieldMapping) {
+                foreach ($fieldMapping->fields as $field) {
+                    $key         = trim($field['key'] ?? '');
+                    $labourField = trim($field['labour_field'] ?? '');
+                    if ($key && $labourField) {
+                        $keyToLabour[$key] = $labourField;
+                    }
+                }
+            }
+        }
+
+        // Fallback alias map: OCR key → Labour column
+        $aliasMap = [
+            'id_card' => 'id_card', 'id_number' => 'id_card', 'id_card_number' => 'id_card', 'card_number' => 'id_card',
+            'passport_no' => 'passport_no', 'passport_number' => 'passport_no', 'coi_number' => 'passport_no', 'document_number' => 'passport_no',
+            'type' => 'document_type', 'document_type' => 'document_type',
+            'prefix' => 'prefix',
+            'firstname' => 'firstname', 'first_name' => 'firstname', 'given_names' => 'firstname',
+            'middlename' => 'middlename', 'middle_name' => 'middlename',
+            'lastname' => 'lastname', 'last_name' => 'lastname', 'surname' => 'lastname', 'family_name' => 'lastname',
+            'firstname_en' => 'firstname_en', 'name_en' => 'firstname_en',
+            'lastname_en' => 'lastname_en',
+            'birthdate' => 'birthdate', 'date_of_birth' => 'birthdate',
+            'gender' => 'gender', 'sex' => 'gender',
+            'nationality' => 'nationality',
+            'address' => 'address',
+            'issue_date' => 'issue_date', 'date_of_issue' => 'issue_date',
+            'issue_place' => 'issue_place', 'authority' => 'issue_place',
+            'expiry_date' => 'expiry_date', 'date_of_expiry' => 'expiry_date',
+            'photo' => 'photo',
+        ];
+
+        $labourData = [];
+
+        foreach ($data as $key => $value) {
+            if ($value === null || $value === '') continue;
+
+            // 1. Template labour_field (explicit)
+            $col = $keyToLabour[$key] ?? null;
+            // 2. Fallback alias map
+            if (!$col) {
+                $col = $aliasMap[mb_strtolower($key)] ?? null;
+            }
+
+            if ($col && !isset($labourData[$col])) {
+                $labourData[$col] = $value;
+            }
+        }
+
+        // Handle full_name → split into firstname/lastname
+        $fullName = null;
+        foreach (['full_name', 'name', 'full_name_en'] as $nameKey) {
+            if (!empty($data[$nameKey])) { $fullName = $data[$nameKey]; break; }
+        }
+        if ($fullName && empty($labourData['firstname']) && empty($labourData['lastname'])) {
+            $nameParts = preg_split('/\s+/', trim($fullName), 2);
+            $labourData['firstname']    = $nameParts[0] ?? null;
+            $labourData['lastname']     = $nameParts[1] ?? null;
+            $labourData['firstname_en'] = $labourData['firstname_en'] ?? ($nameParts[0] ?? null);
+            $labourData['lastname_en']  = $labourData['lastname_en']  ?? ($nameParts[1] ?? null);
+        }
+
+        // Handle full_name_th
+        $fullNameTh = $data['full_name_th'] ?? null;
+        if ($fullNameTh && empty($labourData['firstname'])) {
+            $nameParts = preg_split('/\s+/', trim($fullNameTh), 2);
+            $labourData['firstname'] = $nameParts[0] ?? null;
+            $labourData['lastname']  = $nameParts[1] ?? $labourData['lastname'] ?? null;
+        }
+
+        // Handle full_name_en
+        $fullNameEn = $data['full_name_en'] ?? null;
+        if ($fullNameEn && empty($labourData['firstname_en'])) {
+            $nameParts = preg_split('/\s+/', trim($fullNameEn), 2);
+            $labourData['firstname_en'] = $nameParts[0] ?? null;
+            $labourData['lastname_en']  = $nameParts[1] ?? $labourData['lastname_en'] ?? null;
+        }
+
+        return $labourData;
+    }
+
+    /**
+     * Safe date parse — handles DD/MM/YYYY from OCR correctly.
      */
     private function parseDate(?string $val): ?string
     {
         if (!$val) return null;
         try {
+            // OCR typically returns DD/MM/YYYY — Carbon::parse treats / as M/D/Y (American)
+            // so we must detect and convert DD/MM/YYYY explicitly
+            if (preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})$#', $val, $m)) {
+                return \Carbon\Carbon::createFromFormat('d/m/Y', $val)->toDateString();
+            }
+            if (preg_match('#^(\d{1,2})-(\d{1,2})-(\d{4})$#', $val, $m)) {
+                return \Carbon\Carbon::createFromFormat('d-m-Y', $val)->toDateString();
+            }
             return \Carbon\Carbon::parse($val)->toDateString();
         } catch (\Throwable) {
             return null;

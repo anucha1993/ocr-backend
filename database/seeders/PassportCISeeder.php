@@ -19,6 +19,7 @@ class PassportCISeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'type',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'document_type',
                         'value_map'       => ['Cl' => 'CI', 'C1' => 'CI'],
                     ],
                     [
@@ -27,6 +28,7 @@ class PassportCISeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'country',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => '',
                     ],
                     [
                         'key'             => 'coi_number',
@@ -34,6 +36,7 @@ class PassportCISeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'document_number',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'passport_no',
                     ],
                     [
                         'key'             => 'full_name',
@@ -41,6 +44,7 @@ class PassportCISeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'full_name',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'firstname',
                     ],
                     [
                         'key'             => 'also_known_as',
@@ -48,6 +52,7 @@ class PassportCISeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'Also known as\s+([A-Z][A-Z ]{2,40})',
                         'extraction_mode' => 'auto',
+                        'labour_field'    => '',
                     ],
                     [
                         'key'             => 'nationality',
@@ -55,15 +60,16 @@ class PassportCISeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'nationality',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'nationality',
                         'transform'       => ['normalize_nationality'],
                     ],
-                    
                     [
                         'key'             => 'date_of_birth',
                         'label'           => 'Date of Birth',
                         'keywords'        => [],
                         'regex'           => 'date_of_birth',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'birthdate',
                     ],
                     [
                         'key'             => 'sex',
@@ -71,6 +77,7 @@ class PassportCISeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'sex',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'gender',
                         'transform'       => ['normalize_gender'],
                     ],
                     [
@@ -79,6 +86,7 @@ class PassportCISeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'Place of birth\s+([A-Z][A-Za-z ,]+)',
                         'extraction_mode' => 'auto',
+                        'labour_field'    => '',
                     ],
                     [
                         'key'             => 'authority',
@@ -86,6 +94,7 @@ class PassportCISeeder extends Seeder
                         'keywords'        => ['Authority'],
                         'regex'           => null,
                         'extraction_mode' => 'next_line',
+                        'labour_field'    => 'issue_place',
                     ],
                     [
                         'key'             => 'date_of_issue',
@@ -93,6 +102,7 @@ class PassportCISeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'Date of issue\s+(\d{1,2}\s+[A-Z]{3,9}\s+\d{4})',
                         'extraction_mode' => 'auto',
+                        'labour_field'    => 'issue_date',
                     ],
                     [
                         'key'             => 'date_of_expiry',
@@ -100,6 +110,7 @@ class PassportCISeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'date_of_expiry',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'expiry_date',
                     ],
                 ],
                 'detection_landmarks' => [

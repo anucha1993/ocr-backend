@@ -37,6 +37,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['เลขประจำตัวประชาชน', 'Identification Number', 'ID No'],
                         'regex'           => '(\d[\s\-]?\d{4}[\s\-]?\d{5}[\s\-]?\d{2}[\s\-]?\d)',
                         'extraction_mode' => 'same_line',
+                        'labour_field'    => 'id_card',
                     ],
                     [
                         'key'             => 'full_name_th',
@@ -44,6 +45,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['ชื่อ', 'ชื่อตัวและชื่อสกุล'],
                         'regex'           => null,
                         'extraction_mode' => 'same_line',
+                        'labour_field'    => 'firstname',
                     ],
                     [
                         'key'             => 'full_name_en',
@@ -51,6 +53,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['Name', 'Full Name'],
                         'regex'           => '(?:Name|Last\s*name)\s*([A-Za-z\s\-]+)',
                         'extraction_mode' => 'same_line',
+                        'labour_field'    => 'firstname_en',
                     ],
                     [
                         'key'             => 'date_of_birth',
@@ -58,6 +61,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['เกิดวันที่', 'Date of Birth', 'Birth'],
                         'regex'           => '(?:Date\s*of\s*Birth|เกิดวันที่)\s*[:：]?\s*(\d{1,2}[\s\/\-\.]\w{2,9}[\s\/\-\.]\d{2,4})',
                         'extraction_mode' => 'same_line',
+                        'labour_field'    => 'birthdate',
                     ],
                     [
                         'key'             => 'expiry_date',
@@ -65,6 +69,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['บัตรหมดอายุ', 'Date of Expiry', 'Expiry'],
                         'regex'           => '(?:Date\s*of\s*Expiry|บัตรหมดอายุ)\s*[:：]?\s*(\d{1,2}[\s\/\-\.]\w{2,9}[\s\/\-\.]\d{2,4})',
                         'extraction_mode' => 'same_line',
+                        'labour_field'    => 'expiry_date',
                     ],
                     [
                         'key'             => 'address',
@@ -72,6 +77,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['ที่อยู่', 'Address'],
                         'regex'           => null,
                         'extraction_mode' => 'same_line',
+                        'labour_field'    => 'address',
                     ],
                 ],
                 'detection_landmarks' => [
@@ -97,6 +103,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => '(\d{2}\s*\d{4}\s*\d{5,7}\s*\d?)',
                         'extraction_mode' => 'auto',
+                        'labour_field'    => 'id_card',
                     ],
                     [
                         'key'             => 'side_number',
@@ -104,6 +111,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => '(\d{4}[\-\x{2010}\x{2011}\x{2012}\x{2013}\x{2014}\x{2015}]\d{7})',
                         'extraction_mode' => 'auto',
+                        'labour_field'    => '',
                     ],
                     [
                         'key'             => 'nationality',
@@ -111,6 +119,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['NON THAI IDENTIFICATION CARD', 'ไม่มีสัญชาติไทย'],
                         'regex'           => null,
                         'extraction_mode' => 'next_line',
+                        'labour_field'    => 'nationality',
                     ],
                     [
                         'key'             => 'name_th',
@@ -118,6 +127,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['ชื่อ'],
                         'regex'           => null,
                         'extraction_mode' => 'same_line',
+                        'labour_field'    => 'firstname',
                     ],
                     [
                         'key'             => 'name_en',
@@ -125,6 +135,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['Name'],
                         'regex'           => 'Name\s+(.+)',
                         'extraction_mode' => 'same_line',
+                        'labour_field'    => 'firstname_en',
                     ],
                     [
                         'key'             => 'date_of_birth',
@@ -132,6 +143,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['Date of Birth', 'เกิดวันที่', 'เกิดวันที'],
                         'regex'           => 'Date of Birth\s+(\d{1,2}\s+\w+\.?\s+\d{4})',
                         'extraction_mode' => 'same_line',
+                        'labour_field'    => 'birthdate',
                     ],
                     [
                         'key'             => 'address',
@@ -139,6 +151,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['ที่อยู่'],
                         'regex'           => null,
                         'extraction_mode' => 'same_line',
+                        'labour_field'    => 'address',
                     ],
                     [
                         'key'             => 'date_of_issue',
@@ -146,6 +159,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['วันออกบัตร'],
                         'regex'           => null,
                         'extraction_mode' => 'next_line',
+                        'labour_field'    => 'issue_date',
                     ],
                     [
                         'key'             => 'date_of_expiry',
@@ -153,6 +167,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['Date of Expiry', 'วันบัตรหมดอายุ'],
                         'regex'           => null,
                         'extraction_mode' => 'prev_line',
+                        'labour_field'    => 'expiry_date',
                     ],
                 ],
                 'detection_landmarks' => [
@@ -178,6 +193,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'type',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'document_type',
                         'value_map'       => ['Cl' => 'CI', 'C1' => 'CI'],
                     ],
                     [
@@ -186,6 +202,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'country',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => '',
                     ],
                     [
                         'key'             => 'coi_number',
@@ -193,6 +210,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'document_number',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'passport_no',
                     ],
                     [
                         'key'             => 'full_name',
@@ -200,6 +218,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'full_name',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'firstname',
                     ],
                     [
                         'key'             => 'also_known_as',
@@ -207,6 +226,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'Also known as\s+([A-Z][A-Z ]{2,40})',
                         'extraction_mode' => 'auto',
+                        'labour_field'    => '',
                     ],
                     [
                         'key'             => 'nationality',
@@ -214,6 +234,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'nationality',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'nationality',
                         'transform'       => ['normalize_nationality'],
                     ],
                     [
@@ -222,6 +243,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'date_of_birth',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'birthdate',
                     ],
                     [
                         'key'             => 'sex',
@@ -229,6 +251,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'sex',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'gender',
                         'transform'       => ['normalize_gender'],
                     ],
                     [
@@ -237,6 +260,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'Place of birth\s+([A-Z][A-Za-z ,]+)',
                         'extraction_mode' => 'auto',
+                        'labour_field'    => '',
                     ],
                     [
                         'key'             => 'authority',
@@ -244,6 +268,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => ['Authority'],
                         'regex'           => null,
                         'extraction_mode' => 'next_line',
+                        'labour_field'    => 'issue_place',
                     ],
                     [
                         'key'             => 'date_of_issue',
@@ -251,6 +276,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'Date of issue\s+(\d{1,2}\s+[A-Z]{3,9}\s+\d{4})',
                         'extraction_mode' => 'auto',
+                        'labour_field'    => 'issue_date',
                     ],
                     [
                         'key'             => 'date_of_expiry',
@@ -258,6 +284,7 @@ class OcrFieldMappingSeeder extends Seeder
                         'keywords'        => [],
                         'regex'           => 'date_of_expiry',
                         'extraction_mode' => 'mrz',
+                        'labour_field'    => 'expiry_date',
                     ],
                 ],
                 'detection_landmarks' => [

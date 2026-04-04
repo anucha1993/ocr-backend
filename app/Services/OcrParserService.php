@@ -1182,6 +1182,7 @@ class OcrParserService
                 'keywords'        => ['Name', 'Full Name', 'Surname', 'Given Name', 'Given Names'],
                 'regex'           => '(?:(?:Sur)?name|Given\s*Names?)\s*[:：/]?\s*([A-Z][A-Za-z .\-]{2,40})',
                 'extraction_mode' => 'auto',
+                'labour_field'    => 'firstname',
             ],
             [
                 'key'             => 'passport_number',
@@ -1189,6 +1190,7 @@ class OcrParserService
                 'keywords'        => ['Passport No', 'Passport No.', 'Passport Number', 'Document No'],
                 'regex'           => '(?:Passport\s*(?:No\.?|Number)|Document\s*No\.?)\s*[:：]?\s*([A-Z0-9]{6,12})',
                 'extraction_mode' => 'auto',
+                'labour_field'    => 'passport_no',
             ],
             [
                 'key'             => 'date_of_birth',
@@ -1196,6 +1198,7 @@ class OcrParserService
                 'keywords'        => ['Date of Birth', 'Birth Date', 'DOB', 'D.O.B'],
                 'regex'           => '(?:Date\s*of\s*Birth|Birth\s*Date|D\.?O\.?B\.?)\s*[:：]?\s*(\d{1,2}[\s\/\-\.]\w{2,9}[\s\/\-\.]\d{2,4})',
                 'extraction_mode' => 'auto',
+                'labour_field'    => 'birthdate',
             ],
             [
                 'key'             => 'expiry_date',
@@ -1203,6 +1206,7 @@ class OcrParserService
                 'keywords'        => ['Date of Expiry', 'Expiry Date', 'Expiration Date', 'Valid Until', 'Expires'],
                 'regex'           => '(?:Date\s*of\s*[Ee]xpiry|Expiry\s*Date|Expiration\s*Date|Valid\s*Until|Expires)\b.{0,30}?(\d{1,2}[\s\/\-\.]\w{2,9}[\s\/\-\.]\d{2,4})',
                 'extraction_mode' => 'auto',
+                'labour_field'    => 'expiry_date',
             ],
             [
                 'key'             => 'nationality',
@@ -1210,6 +1214,7 @@ class OcrParserService
                 'keywords'        => ['Nationality', 'Citizen'],
                 'regex'           => '(?:Nationality|Citizen(?:ship)?)\s*[:：]?\s*([A-Z0-9][A-Za-z0-9]{2,20})',
                 'extraction_mode' => 'auto',
+                'labour_field'    => 'nationality',
             ],
             [
                 'key'             => 'gender',
@@ -1217,6 +1222,7 @@ class OcrParserService
                 'keywords'        => ['Sex', 'Gender'],
                 'regex'           => '(?:Sex|Gender)\b.{0,50}?\b(Male|Female|M\w{0,3}|F\w{0,5})\b',
                 'extraction_mode' => 'auto',
+                'labour_field'    => 'gender',
                 'transform'       => ['normalize_gender'],
             ],
             [
@@ -1225,6 +1231,7 @@ class OcrParserService
                 'keywords'        => ['Place of Birth', 'Birth Place'],
                 'regex'           => '(?:Place\s*of\s*Birth|Birth\s*Place)\b.{0,30}?\b([A-Z][A-Za-z]{2,}[A-Za-z ,\-]{0,40})',
                 'extraction_mode' => 'auto',
+                'labour_field'    => '',
             ],
             [
                 'key'             => 'issue_date',
@@ -1232,6 +1239,7 @@ class OcrParserService
                 'keywords'        => ['Date of Issue', 'Issue Date', 'Issued'],
                 'regex'           => '(?:Date\s*of\s*Issue|Issue\s*Date|Issued)\b.{0,30}?(\d{1,2}[\s\/\-\.]\w{2,9}[\s\/\-\.]\d{2,4})',
                 'extraction_mode' => 'auto',
+                'labour_field'    => 'issue_date',
             ],
         ];
     }

@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiTestApiController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\DashboardApiController;
+use App\Http\Controllers\Api\DocumentTypeRuleController;
 use App\Http\Controllers\Api\ForeignDataController;
 use App\Http\Controllers\Api\IdCardController;
 use App\Http\Controllers\Api\IdCardReaderSettingController;
@@ -50,9 +51,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/scan-batches/{scanBatch}/export', [ScanBatchController::class, 'export']);
     Route::delete('/scan-batches/{scanBatch}', [ScanBatchController::class, 'destroy']);
 
-    // ID Card Reader Settings
+    // ID Card Reader Settings (read = all, write = admin)
     Route::get('/idcard-reader-settings', [IdCardReaderSettingController::class, 'show']);
-    Route::put('/idcard-reader-settings', [IdCardReaderSettingController::class, 'update']);
+
+    // Document Type Rules (read = all for auto-calc, write = admin)
+    Route::get('/document-type-rules', [DocumentTypeRuleController::class, 'index']);
+
+    // Passport Mappings (read = all for id-card-reader, write = admin)
+    Route::get('/passport-mappings', [PassportMappingController::class, 'index']);
+    Route::get('/passport-mappings/{passportMapping}', [PassportMappingController::class, 'show']);
+
+    // OCR field mappings (read = all for OCR processing)
+    Route::get('/ocr/field-mappings', [OcrController::class, 'fieldMappings']);
+    Route::get('/ocr/default-fields', [OcrController::class, 'defaultFields']);
 
     // Notifications
     Route::prefix('notifications')->group(function () {
@@ -62,11 +73,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/read-all', [NotificationController::class, 'markAllAsRead']);
         Route::delete('/{notification}', [NotificationController::class, 'destroy']);
     });
-
-    // Passport Mappings
-    Route::apiResource('passport-mappings', PassportMappingController::class)->parameters([
-        'passport-mappings' => 'passportMapping',
-    ]);
 
     // ─── OCR Processing ────────────────────────────────────
     Route::prefix('ocr')->group(function () {
@@ -86,19 +92,27 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/results', [OcrController::class, 'results']);
         Route::get('/results/{ocrResult}', [OcrController::class, 'showResult']);
         Route::delete('/results/{ocrResult}', [OcrController::class, 'destroyResult']);
-
-        // Field mappings (configurable fields)
-        Route::get('/field-mappings', [OcrController::class, 'fieldMappings']);
-        Route::post('/field-mappings', [OcrController::class, 'storeFieldMapping']);
-        Route::put('/field-mappings/{ocrFieldMapping}', [OcrController::class, 'updateFieldMapping']);
-        Route::delete('/field-mappings/{ocrFieldMapping}', [OcrController::class, 'destroyFieldMapping']);
-
-        // Default fields reference
-        Route::get('/default-fields', [OcrController::class, 'defaultFields']);
     });
 
     // ─── Admin-only routes ─────────────────────────────────
     Route::middleware('role:admin')->group(function () {
+        // ID Card Reader Settings (write)
+        Route::put('/idcard-reader-settings', [IdCardReaderSettingController::class, 'update']);
+
+        // Passport Mappings (write)
+        Route::post('/passport-mappings', [PassportMappingController::class, 'store']);
+        Route::put('/passport-mappings/{passportMapping}', [PassportMappingController::class, 'update']);
+        Route::delete('/passport-mappings/{passportMapping}', [PassportMappingController::class, 'destroy']);
+
+        // Document Type Rules (write)
+        Route::post('/document-type-rules', [DocumentTypeRuleController::class, 'store']);
+        Route::put('/document-type-rules/{documentTypeRule}', [DocumentTypeRuleController::class, 'update']);
+        Route::delete('/document-type-rules/{documentTypeRule}', [DocumentTypeRuleController::class, 'destroy']);
+
+        // OCR Field Mappings (write)
+        Route::post('/ocr/field-mappings', [OcrController::class, 'storeFieldMapping']);
+        Route::put('/ocr/field-mappings/{ocrFieldMapping}', [OcrController::class, 'updateFieldMapping']);
+        Route::delete('/ocr/field-mappings/{ocrFieldMapping}', [OcrController::class, 'destroyFieldMapping']);
 
         // Zoho Settings
         Route::prefix('zoho')->group(function () {
