@@ -49,6 +49,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/scan-batches/{scanBatch}', [ScanBatchController::class, 'show']);
     Route::patch('/scan-batches/{scanBatch}/visibility', [ScanBatchController::class, 'updateVisibility']);
     Route::get('/scan-batches/{scanBatch}/export', [ScanBatchController::class, 'export']);
+    Route::delete('/scan-batches/{scanBatch}', [ScanBatchController::class, 'destroy']);
+
+    // Dashboard
+    Route::get('/dashboard/stats', [DashboardApiController::class, 'stats']);
 
     // ID Card Reader Settings (read = all, write = admin)
     Route::get('/idcard-reader-settings', [IdCardReaderSettingController::class, 'show']);
@@ -87,19 +91,14 @@ Route::middleware('auth:sanctum')->group(function () {
         // Save OCR batch results as labour records
         Route::post('/batch/{batchId}/save-labours', [OcrController::class, 'saveBatchAsLabours']);
 
-        // Results (list, show)
+        // Results (list, show, delete own)
         Route::get('/results', [OcrController::class, 'results']);
         Route::get('/results/{ocrResult}', [OcrController::class, 'showResult']);
+        Route::delete('/results/{ocrResult}', [OcrController::class, 'destroyResult']);
     });
 
     // ─── Admin-only routes ─────────────────────────────────
     Route::middleware('role:admin')->group(function () {
-        // Scan Batches (delete)
-        Route::delete('/scan-batches/{scanBatch}', [ScanBatchController::class, 'destroy']);
-
-        // OCR Results (delete)
-        Route::delete('/ocr/results/{ocrResult}', [OcrController::class, 'destroyResult']);
-
         // ID Card Reader Settings (write)
         Route::put('/idcard-reader-settings', [IdCardReaderSettingController::class, 'update']);
 
@@ -125,9 +124,6 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/test-connection', [ZohoSettingController::class, 'testConnection']);
             Route::post('/refresh-token', [ZohoSettingController::class, 'refreshAccessToken']);
         });
-
-        // Dashboard
-        Route::get('/dashboard/stats', [DashboardApiController::class, 'stats']);
 
         // Audit Logs
         Route::get('/audit-logs', [AuditLogController::class, 'index']);
