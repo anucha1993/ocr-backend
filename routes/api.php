@@ -88,14 +88,16 @@ Route::middleware('auth:sanctum')->group(function () {
         // Save OCR batch results as labour records
         Route::post('/batch/{batchId}/save-labours', [OcrController::class, 'saveBatchAsLabours']);
 
-        // Results (list, show, delete)
+        // Results (list, show)
         Route::get('/results', [OcrController::class, 'results']);
         Route::get('/results/{ocrResult}', [OcrController::class, 'showResult']);
-        Route::delete('/results/{ocrResult}', [OcrController::class, 'destroyResult']);
     });
 
     // ─── Admin-only routes ─────────────────────────────────
     Route::middleware('role:admin')->group(function () {
+        // OCR Results (delete)
+        Route::delete('/ocr/results/{ocrResult}', [OcrController::class, 'destroyResult']);
+
         // ID Card Reader Settings (write)
         Route::put('/idcard-reader-settings', [IdCardReaderSettingController::class, 'update']);
 
