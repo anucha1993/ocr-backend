@@ -49,7 +49,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/scan-batches/{scanBatch}', [ScanBatchController::class, 'show']);
     Route::patch('/scan-batches/{scanBatch}/visibility', [ScanBatchController::class, 'updateVisibility']);
     Route::get('/scan-batches/{scanBatch}/export', [ScanBatchController::class, 'export']);
-    Route::delete('/scan-batches/{scanBatch}', [ScanBatchController::class, 'destroy']);
 
     // ID Card Reader Settings (read = all, write = admin)
     Route::get('/idcard-reader-settings', [IdCardReaderSettingController::class, 'show']);
@@ -95,6 +94,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ─── Admin-only routes ─────────────────────────────────
     Route::middleware('role:admin')->group(function () {
+        // Scan Batches (delete)
+        Route::delete('/scan-batches/{scanBatch}', [ScanBatchController::class, 'destroy']);
+
         // OCR Results (delete)
         Route::delete('/ocr/results/{ocrResult}', [OcrController::class, 'destroyResult']);
 
