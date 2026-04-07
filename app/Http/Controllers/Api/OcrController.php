@@ -294,7 +294,12 @@ class OcrController extends Controller
         ]);
 
         try {
-            $extractedData = $parserService->extract($pageText, $pageFields);
+            $extractedData = $parserService->extract(
+                $pageText,
+                $pageFields,
+                $pageMapping?->text_start_after,
+                $pageMapping?->text_end_before,
+            );
             $validation = OcrValidationService::validate($extractedData);
 
             $ocrResult->update([
@@ -524,6 +529,8 @@ class OcrController extends Controller
             'detection_landmarks.*.type'     => 'required|string|in:mrz,keyword,regex,not_keyword',
             'detection_landmarks.*.value'    => 'nullable|string|max:500',
             'detection_landmarks.*.weight'   => 'required|integer|min:-200|max:200',
+            'text_start_after'  => 'nullable|string|max:255',
+            'text_end_before'   => 'nullable|string|max:255',
             'is_active'         => 'boolean',
         ]);
 
@@ -557,6 +564,8 @@ class OcrController extends Controller
             'detection_landmarks.*.type'     => 'required|string|in:mrz,keyword,regex,not_keyword',
             'detection_landmarks.*.value'    => 'nullable|string|max:500',
             'detection_landmarks.*.weight'   => 'required|integer|min:-200|max:200',
+            'text_start_after'  => 'nullable|string|max:255',
+            'text_end_before'   => 'nullable|string|max:255',
             'is_active'         => 'boolean',
         ]);
 

@@ -11,6 +11,8 @@ class OcrFieldMapping extends Model
         'name',
         'fields',
         'detection_landmarks',
+        'text_start_after',
+        'text_end_before',
         'is_active',
     ];
 

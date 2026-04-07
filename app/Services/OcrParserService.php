@@ -13,8 +13,22 @@ class OcrParserService
      *   extraction_mode: 'auto' (default), 'same_line', 'next_line'
      * @return array<string, string|null>  Extracted key-value pairs.
      */
-    public function extract(string $rawText, array $fields): array
+    public function extract(string $rawText, array $fields, ?string $textStartAfter = null, ?string $textEndBefore = null): array
     {
+        // Apply text section filter
+        if ($textStartAfter) {
+            $pos = mb_stripos($rawText, $textStartAfter);
+            if ($pos !== false) {
+                $rawText = mb_substr($rawText, $pos);
+            }
+        }
+        if ($textEndBefore) {
+            $pos = mb_stripos($rawText, $textEndBefore);
+            if ($pos !== false) {
+                $rawText = mb_substr($rawText, 0, $pos);
+            }
+        }
+
         $normalizedText = $this->normalizeText($rawText);
         $result = [];
 
