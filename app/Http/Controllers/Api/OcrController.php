@@ -116,7 +116,11 @@ class OcrController extends Controller
 
                     if ($isPdf) {
                         // ── PDF: OCR page-by-page for real-time streaming ──
-                        $totalPages = $visionService->pdfPageCount($tempPath);
+                        try {
+                            $totalPages = $visionService->pdfPageCount($tempPath);
+                        } catch (\Throwable $e) {
+                            $totalPages = 0; // will be determined inside ocrPdfPageByPage
+                        }
 
                         $this->sendEvent([
                             'event'      => 'ocr_start',
@@ -277,6 +281,18 @@ class OcrController extends Controller
                     ]);
                     return;
                 }
+            }
+
+            // Skip page if text_start_after marker is not found on this page
+            if ($pageMapping->text_start_after && mb_stripos($pageText, $pageMapping->text_start_after) === false) {
+                $this->sendEvent([
+                    'event'  => 'page_skip',
+                    'file'   => $originalName,
+                    'page'   => $pageNum,
+                    'total'  => $totalPages,
+                    'reason' => 'text_filter_no_match',
+                ]);
+                return;
             }
         }
 

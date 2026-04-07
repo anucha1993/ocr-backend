@@ -19,7 +19,10 @@ class OcrParserService
         if ($textStartAfter) {
             $pos = mb_stripos($rawText, $textStartAfter);
             if ($pos !== false) {
-                $rawText = mb_substr($rawText, $pos);
+                $rawText = mb_substr($rawText, $pos + mb_strlen($textStartAfter));
+            } else {
+                // Start marker not found on this page — skip extraction
+                return array_fill_keys(array_column($fields, 'key'), null);
             }
         }
         if ($textEndBefore) {

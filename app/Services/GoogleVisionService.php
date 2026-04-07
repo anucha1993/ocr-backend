@@ -241,8 +241,85 @@ class GoogleVisionService
      */
     private function getPdfPageCount(string $filePath): int
     {
-        $fpdi = new Fpdi();
-        return $fpdi->setSourceFile($filePath);
+        try {
+            $fpdi = new Fpdi();
+            return $fpdi->setSourceFile($filePath);
+        } catch (\Throwable $e) {
+            Log::warning('getPdfPageCount: FPDI failed, trying Ghostscript', ['error' => $e->getMessage()]);
+
+            $gsBin = $this->findGhostscript();
+            if (!$gsBin) {
+                throw new \RuntimeException('FPDI failed and Ghostscript is not available: ' . $e->getMessage());
+            }
+
+            return $this->getPdfPageCountViaGs($gsBin, $filePath);
+        }
+    }
+
+    /**
+     * Find the Ghostscript binary on the current platform.
+     */
+    private function findGhostscript(): ?string
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            foreach (['gswin64c', 'gswin32c', 'gs'] as $name) {
+                $where = @shell_exec("where {$name} 2>NUL");
+                if ($where && trim($where)) {
+                    return trim(explode("\n", trim($where))[0]);
+                }
+            }
+        } else {
+            $which = @shell_exec('which gs 2>/dev/null');
+            if ($which && trim($which)) {
+                return trim($which);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Get PDF page count via Ghostscript.
+     */
+    private function getPdfPageCountViaGs(string $gsBin, string $filePath): int
+    {
+        $cmd = sprintf(
+            '%s -q -dNODISPLAY -dNOSAFER -c "(%s) (r) file runpdfbegin pdfpagecount = quit" 2>&1',
+            escapeshellarg($gsBin),
+            str_replace('\\', '/', $filePath)
+        );
+        $output = @shell_exec($cmd);
+        $count = (int) trim($output ?? '0');
+
+        if ($count < 1) {
+            throw new \RuntimeException('Ghostscript could not determine page count');
+        }
+
+        return $count;
+    }
+
+    /**
+     * Convert a single PDF page to a PNG file using Ghostscript.
+     */
+    private function renderPdfPageToPng(string $gsBin, string $pdfPath, int $page, int $dpi = 300): string
+    {
+        $outputPath = tempnam(sys_get_temp_dir(), 'ocr_gs_') . '.png';
+        $cmd = sprintf(
+            '%s -dNOPAUSE -dBATCH -dSAFER -sDEVICE=png16m -r%d -dFirstPage=%d -dLastPage=%d -sOutputFile=%s %s 2>&1',
+            escapeshellarg($gsBin),
+            $dpi,
+            $page,
+            $page,
+            escapeshellarg($outputPath),
+            escapeshellarg($pdfPath)
+        );
+        exec($cmd, $out, $returnCode);
+
+        if ($returnCode !== 0 || !file_exists($outputPath)) {
+            @unlink($outputPath);
+            throw new \RuntimeException('Ghostscript failed to render page ' . $page);
+        }
+
+        return $outputPath;
     }
 
     /**
@@ -388,21 +465,67 @@ class GoogleVisionService
      */
     public function ocrPdfPageByPage(string $filePath, callable $onPage): void
     {
-        $totalPages = $this->getPdfPageCount($filePath);
-        $totalPages = min($totalPages, 100);
+        // Try FPDI first
+        try {
+            $totalPages = $this->getPdfPageCount($filePath);
+            $totalPages = min($totalPages, 100);
+
+            for ($page = 1; $page <= $totalPages; $page++) {
+                $chunkPath = $this->extractPdfPages($filePath, $page, $page);
+                try {
+                    $result = $this->ocrSmallPdf($chunkPath);
+                    $text       = $result['page_texts'][0] ?? '';
+                    $confidence = $result['page_confidences'][0] ?? null;
+                    $onPage($page, $totalPages, $text, $confidence);
+                } catch (\Throwable $e) {
+                    Log::warning("ocrPdfPageByPage: page {$page} failed", ['error' => $e->getMessage()]);
+                    $onPage($page, $totalPages, '', null);
+                } finally {
+                    @unlink($chunkPath);
+                }
+            }
+            return;
+        } catch (\Throwable $fpdiError) {
+            Log::warning('ocrPdfPageByPage: FPDI failed, falling back to Imagick', [
+                'error' => $fpdiError->getMessage(),
+            ]);
+        }
+
+        // Fallback: Ghostscript page-by-page
+        $gsBin = $this->findGhostscript();
+        if (!$gsBin) {
+            throw new \RuntimeException('FPDI cannot parse this PDF and Ghostscript is not available.');
+        }
+
+        $totalPages = min($this->getPdfPageCountViaGs($gsBin, $filePath), 100);
 
         for ($page = 1; $page <= $totalPages; $page++) {
-            $chunkPath = $this->extractPdfPages($filePath, $page, $page);
+            $pngPath = null;
             try {
-                $result = $this->ocrSmallPdf($chunkPath);
-                $text       = $result['page_texts'][0] ?? '';
-                $confidence = $result['page_confidences'][0] ?? null;
+                $pngPath = $this->renderPdfPageToPng($gsBin, $filePath, $page);
+                $imageContent = base64_encode(file_get_contents($pngPath));
+
+                $response = Http::timeout(120)->post("{$this->endpoint}?key={$this->apiKey}", [
+                    'requests' => [[
+                        'image'    => ['content' => $imageContent],
+                        'features' => [['type' => 'DOCUMENT_TEXT_DETECTION']],
+                    ]],
+                ]);
+
+                $text = '';
+                $confidence = null;
+                if ($response->ok()) {
+                    $respData = $response->json();
+                    $text = $respData['responses'][0]['fullTextAnnotation']['text'] ?? '';
+                    $vPages = $respData['responses'][0]['fullTextAnnotation']['pages'] ?? [];
+                    $confidence = $this->extractPageConfidence($vPages[0] ?? []);
+                }
                 $onPage($page, $totalPages, $text, $confidence);
             } catch (\Throwable $e) {
-                Log::warning("ocrPdfPageByPage: page {$page} failed", ['error' => $e->getMessage()]);
+                Log::warning("ocrPdfPageByPage GS: page {$page} failed", ['error' => $e->getMessage()]);
                 $onPage($page, $totalPages, '', null);
             } finally {
-                @unlink($chunkPath);
+                if ($pngPath) @unlink($pngPath);
             }
         }
     }
