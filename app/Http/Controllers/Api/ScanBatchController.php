@@ -66,7 +66,7 @@ class ScanBatchController extends Controller
             'note'          => 'nullable|string|max:1000',
             'visibility'    => 'nullable|in:private,public',
             'items'         => 'required|array|min:1',
-            'items.*.document_type' => 'nullable|string|in:idcard,passport',
+            'items.*.document_type' => 'nullable|string|max:20',
             'items.*.id_card'       => 'nullable|string|max:20',
             'items.*.passport_no'   => 'nullable|string|max:20',
             'items.*.prefix'        => 'nullable|string|max:50',
@@ -184,7 +184,11 @@ class ScanBatchController extends Controller
         foreach ($scanBatch->labours as $i => $labour) {
             $docLabel = match(strtoupper($labour->document_type ?? '')) {
                 'PJ' => 'PJ (Passport)',
+                'PV' => 'PV (Passport)',
+                'PN' => 'PN (Passport)',
+                'PA' => 'PA (Passport)',
                 'CI' => 'CI (บัตร ปชช.)',
+                'IDCARD' => 'บัตร ปชช.',
                 'P', 'PASSPORT' => 'Passport',
                 default => $labour->document_type ?? '',
             };

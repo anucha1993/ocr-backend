@@ -40,7 +40,7 @@ class IdCardController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'document_type' => 'nullable|string|in:idcard,passport',
+            'document_type' => 'nullable|string|max:20',
             'id_card'       => 'nullable|string|max:20',
             'passport_no'   => 'nullable|string|max:20',
             'prefix'        => 'nullable|string|max:50',
